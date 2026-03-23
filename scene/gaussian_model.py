@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from torch import nn
 import os
+import json
 
 from scipy.spatial.transform import Rotation
 import torch.nn.functional as F
@@ -600,6 +601,26 @@ class GaussianModel:
             'alpha': alpha,
         }
         return torch.clamp(shaded, 0.0, 1.0), alpha, info
+
+    @torch.no_grad()
+    def set_deferred_lighting(self, light_sh=None, light_dc=None):
+        if light_sh is not None:
+            light_sh = torch.as_tensor(light_sh, dtype=self.deferred_light_sh.dtype, device=self.deferred_light_sh.device)
+            self.deferred_light_sh.copy_(light_sh.reshape_as(self.deferred_light_sh))
+        if light_dc is not None:
+            light_dc = torch.as_tensor(light_dc, dtype=self.deferred_light_dc.dtype, device=self.deferred_light_dc.device)
+            self.deferred_light_dc.copy_(light_dc.reshape_as(self.deferred_light_dc))
+        self.cache_dict = {}
+
+    @torch.no_grad()
+    def load_deferred_lighting(self, json_path):
+        with open(json_path, 'r') as file:
+            data = json.load(file)
+        self.set_deferred_lighting(
+            light_sh=data.get('light_sh', None),
+            light_dc=data.get('light_dc', None),
+        )
+        return data
 
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
