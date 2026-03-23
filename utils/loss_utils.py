@@ -47,3 +47,6 @@ def gaussian_scaling_loss(scaling, threshold=0.01):
     scale_sub = scaling - threshold
     loss = torch.where(scale_sub > 0, scaling, torch.tensor(0, device=scaling.device)).mean()
     return loss
+
+def normal_unit_loss(normal):
+    return (torch.linalg.vector_norm(normal, dim=-1) - 1.0).abs().mean()
