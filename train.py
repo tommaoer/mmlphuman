@@ -49,6 +49,10 @@ def training(args: Config):
     progress_bar = tqdm(range(0, args.iterations), initial=first_iter, desc="TP")
     first_iter += 1
     trainloader_iter = iter(scene.trainloader)
+
+    import lpips
+    loss_fn_vgg = lpips.LPIPS(net='vgg').cuda() # closer to "traditional" perceptual loss, when used for optimization
+
     
     for iteration in range(first_iter, args.iterations + 1):     
         if iteration % 30 == 0:
@@ -82,7 +86,10 @@ def training(args: Config):
 
         random_patch_flag = False if iteration < args.iteration_lpips_random_patch else True
         image_crop, image_gt_crop = crop_image(bg, mask, 512, random_patch_flag, image.permute(2,0,1), image_gt.permute(2,0,1))
-        if iteration > args.iteration_lpips: lpipsloss = lpips_loss(image_crop.permute(1,2,0), image_gt_crop.permute(1,2,0)) * args.lambda_lpips
+        # if iteration > args.iteration_lpips: lpipsloss = lpips_loss(image_crop.permute(1,2,0), image_gt_crop.permute(1,2,0)) * args.lambda_lpips
+        # else: lpipsloss = torch.tensor(0) 
+
+        if iteration > args.iteration_lpips: lpipsloss = loss_fn_vgg(image_crop.unsqueeze(0), image_gt_crop.unsqueeze(0)) * args.lambda_lpips
         else: lpipsloss = torch.tensor(0) 
 
         scaling_loss = args.lambda_scaling * gaussian_scaling_loss(gaussians.get_cano_scaling, args.scaling_threshold)
