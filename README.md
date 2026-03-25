@@ -85,6 +85,53 @@ python train.py --config ./config/{DATASET}.yaml --data_dir {DATASET_DIR} --out_
 ```
 It will take about 17 hours on a RTX 3090. We have not yet implemented the function to resume training from a checkpoint, so please be cautious during training.
 
+### Canonical-space deferredGS training
+
+This repo now includes an optional deferredGS-style branch for dynamic humans:
+
+- canonical-space Gaussian attributes are decomposed into geometry-driven canonical normals, albedo, roughness, and specular terms;
+- these canonical attributes are skinned into the posed target space with the same LBS transforms as the Gaussians;
+- supervision is still applied in the target/image space after deferred shading.
+
+To enable it, set the following in a config:
+
+```yaml
+use_deferredgs: true
+deferred_light_lr: 0.0005
+lambda_deferred_normal: 0.01
+```
+
+The deferred branch keeps the original training pipeline intact, so setting `use_deferredgs: false` restores the original SH-color rendering path.
+
+### Post-training relighting
+
+If the checkpoint was trained with `use_deferredgs: true`, you can relight it at test time by overriding the learned deferred lighting:
+
+```shell
+python test.py \
+  --config ./config/{DATASET}.yaml \
+  --model_dir {MODEL_DIR} \
+  --out_dir {RELIGHT_OUT_DIR} \
+  --data_dir {DATASET_DIR} \
+  --relight_json ./assets/relight_three_point.json \
+  --save_deferred_buffers
+```
+
+The relighting JSON contains:
+
+```json
+{
+  "light_dc": [0.55, 0.52, 0.50],
+  "light_sh": [[... 9 rows total ...]]
+}
+```
+
+- `light_dc`: RGB ambient/base light.
+- `light_sh`: 9 RGB spherical-harmonic coefficients used by the deferred branch.
+- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, and `specular/` image buffers for inspection and manual look-dev.
+
+You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--relight_json`.
+
 ## Visualization
 
 To visualize the results during training, open the viewer, set ip, port, and connect
@@ -135,4 +182,3 @@ This project uses [gsplat](https://github.com/nerfstudio-project/gsplat) rasteri
     year={2025}
 }
 ```
-
