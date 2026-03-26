@@ -20,7 +20,7 @@ from utils.sh_utils import RGB2SH, SH2RGB
 
 class GaussianModel:
     @staticmethod
-    def _estimate_point_normals_from_xyz(xyz, k=8):
+    def _estimate_point_normals_from_xyz(xyz, k=16):
         with torch.no_grad():
             _, idxs, _ = knn_points(xyz[None], xyz[None], K=k+1)
             nbr = xyz[idxs[0][:, 1:]]  # [N, k, 3]
@@ -268,9 +268,20 @@ class GaussianModel:
             if torch.is_tensor(self._sh0) and self._sh0.numel() > 0:
                 if torch.is_tensor(self._shN) and self._shN is not None and self._shN.numel() > 0 and self.sh_degree > 0:
                     sh = torch.cat([self._sh0, self._shN], dim=1)
-                    dirs = torch.zeros((N, 3), dtype=sh.dtype, device=sh.device)
-                    dirs[:, 2] = 1.0
-                    init_albedo_rgb = torch.clamp(spherical_harmonics(self.sh_degree, dirs, sh) + 0.5, 1e-4, 1.0 - 1e-4)
+                    sample_dirs = torch.tensor([
+                        [0.0, 0.0, 1.0],
+                        [0.0, 0.0, -1.0],
+                        [1.0, 0.0, 0.0],
+                        [-1.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                        [0.0, -1.0, 0.0],
+                    ], dtype=sh.dtype, device=sh.device)
+                    sh_eval = []
+                    for d in sample_dirs:
+                        dirs = d[None].repeat(N, 1)
+                        sh_eval.append(spherical_harmonics(self.sh_degree, dirs, sh) + 0.5)
+                    sh_eval = torch.stack(sh_eval, dim=0)
+                    init_albedo_rgb = torch.clamp(torch.quantile(sh_eval, 0.75, dim=0), 1e-4, 1.0 - 1e-4)
                 else:
                     init_albedo_rgb = torch.clamp(SH2RGB(self._sh0[:, 0]), 1e-4, 1.0 - 1e-4)
             else:

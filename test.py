@@ -33,16 +33,27 @@ def save_deferred_buffers(info, out_dir, frame_id):
     os.makedirs(path.join(out_dir, 'normal'), exist_ok=True)
     os.makedirs(path.join(out_dir, 'roughness'), exist_ok=True)
     os.makedirs(path.join(out_dir, 'specular'), exist_ok=True)
+    os.makedirs(path.join(out_dir, 'alpha'), exist_ok=True)
 
-    albedo = (torch.clamp(info['albedo'], 0, 1) * 255).byte().contiguous().cpu().numpy()
-    normal = (torch.clamp(info['normal'] * 0.5 + 0.5, 0, 1) * 255).byte().contiguous().cpu().numpy()
+    alpha = torch.clamp(info['alpha'], 0, 1)
+    confident = alpha > 0.6
+
+    albedo = torch.clamp(info['albedo'], 0, 1)
+    normal = torch.clamp(info['normal'] * 0.5 + 0.5, 0, 1)
+    albedo[~confident.squeeze(-1)] = 0.0
+    normal[~confident.squeeze(-1)] = 0.5
+
+    albedo = (albedo * 255).byte().contiguous().cpu().numpy()
+    normal = (normal * 255).byte().contiguous().cpu().numpy()
     roughness = (torch.clamp(info['roughness'], 0, 1).repeat(1, 1, 3) * 255).byte().contiguous().cpu().numpy()
     specular = (torch.clamp(info['specular'], 0, 1).repeat(1, 1, 3) * 255).byte().contiguous().cpu().numpy()
+    alpha = (alpha.repeat(1, 1, 3) * 255).byte().contiguous().cpu().numpy()
 
     iio.imwrite(path.join(out_dir, 'albedo', f'{frame_id:08d}.png'), albedo)
     iio.imwrite(path.join(out_dir, 'normal', f'{frame_id:08d}.png'), normal)
     iio.imwrite(path.join(out_dir, 'roughness', f'{frame_id:08d}.png'), roughness)
     iio.imwrite(path.join(out_dir, 'specular', f'{frame_id:08d}.png'), specular)
+    iio.imwrite(path.join(out_dir, 'alpha', f'{frame_id:08d}.png'), alpha)
 
 def fovx_to_intrinsic(fovx, H, W):
     focal = W / 2 / np.tan(fovx/2)

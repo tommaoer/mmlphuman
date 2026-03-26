@@ -128,7 +128,7 @@ The relighting JSON contains:
 
 - `light_dc`: RGB ambient/base light.
 - `light_sh`: 9 RGB spherical-harmonic coefficients used by the deferred branch.
-- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, and `specular/` image buffers for inspection and manual look-dev.
+- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
 
 You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--relight_json`.
 
