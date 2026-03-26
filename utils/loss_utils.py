@@ -2,13 +2,16 @@
 
 import torch
 import torch.nn.functional as F
+import lpips
 
 from torch.nn.functional import l1_loss
 from torchmetrics.functional.image import peak_signal_noise_ratio, structural_similarity_index_measure
 
 from scene.gaussian_model import GaussianModel
 
-lpips_model = None
+loss_fn_vgg = lpips.LPIPS(net='vgg').eval().cuda()
+for p in loss_fn_vgg.parameters():
+    p.requires_grad = False
 
 def psnr(img1, img2):
     img1 = img1.permute(2,0,1)[None]
@@ -26,16 +29,11 @@ def ssim_loss(img1, img2, bbox=None):
     return loss
 
 def lpips_loss(img1, img2):
-    global lpips_model
     img1 = img1.permute(2,0,1)[None]
     img2 = img2.permute(2,0,1)[None]
     img1 = img1 * 2.0 - 1.0
     img2 = img2 * 2.0 - 1.0
-    if lpips_model is None:
-        import lpips
-        lpips_model = lpips.LPIPS(net='vgg').eval().cuda()
-        for p in lpips_model.parameters(): p.requires_grad = False
-    loss = lpips_model(img1, img2).mean()
+    loss = loss_fn_vgg(img1, img2).mean()
     return loss
 
 def dxyz_smooth_loss(gaussians: GaussianModel):
