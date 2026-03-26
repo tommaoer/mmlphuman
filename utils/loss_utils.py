@@ -14,7 +14,7 @@ lpips_model = None
 def psnr(img1, img2):
     img1 = img1.permute(2,0,1)[None]
     img2 = img2.permute(2,0,1)[None]
-    loss = peak_signal_noise_ratio(img1, img2)
+    loss = peak_signal_noise_ratio(img1, img2, data_range=1.0)
     return loss
 
 def ssim_loss(img1, img2, bbox=None):
@@ -23,7 +23,7 @@ def ssim_loss(img1, img2, bbox=None):
         img2 = img2[bbox[1]:bbox[3],bbox[0]:bbox[2]]
     img1 = img1.permute(2,0,1)[None]
     img2 = img2.permute(2,0,1)[None]
-    loss = 1.0 - structural_similarity_index_measure(img1, img2)
+    loss = 1.0 - structural_similarity_index_measure(img1, img2, data_range=1.0)
     return loss
 
 def lpips_loss(img1, img2):
@@ -47,3 +47,6 @@ def gaussian_scaling_loss(scaling, threshold=0.01):
     scale_sub = scaling - threshold
     loss = torch.where(scale_sub > 0, scaling, torch.tensor(0, device=scaling.device)).mean()
     return loss
+
+def normal_unit_loss(normal):
+    return (torch.linalg.vector_norm(normal, dim=-1) - 1.0).abs().mean()
