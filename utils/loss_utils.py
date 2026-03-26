@@ -5,7 +5,6 @@ import torch.nn.functional as F
 
 from torch.nn.functional import l1_loss
 from torchmetrics.functional.image import peak_signal_noise_ratio, structural_similarity_index_measure
-from torchmetrics.image import LearnedPerceptualImagePatchSimilarity
 
 from scene.gaussian_model import GaussianModel
 
@@ -30,10 +29,13 @@ def lpips_loss(img1, img2):
     global lpips_model
     img1 = img1.permute(2,0,1)[None]
     img2 = img2.permute(2,0,1)[None]
-    if lpips_model is None: 
-        lpips_model = LearnedPerceptualImagePatchSimilarity(net_type='vgg', normalize=True).cuda()
+    img1 = img1 * 2.0 - 1.0
+    img2 = img2 * 2.0 - 1.0
+    if lpips_model is None:
+        import lpips
+        lpips_model = lpips.LPIPS(net='vgg').eval().cuda()
         for p in lpips_model.parameters(): p.requires_grad = False
-    loss = lpips_model(img1, img2)
+    loss = lpips_model(img1, img2).mean()
     return loss
 
 def dxyz_smooth_loss(gaussians: GaussianModel):
