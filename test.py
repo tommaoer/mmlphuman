@@ -202,6 +202,11 @@ def testing(args: Config):
     gaussians.is_test = args.test.is_test
     gaussians.prepare_test()
     background = torch.as_tensor(np.array(args.background)).float().cuda()
+    if args.test.envmap_path is not None:
+        relight_cfg = gaussians.load_envmap_lighting(args.test.envmap_path, args.test.envmap_intensity)
+        print(f'Loaded envmap relighting: {args.test.envmap_path}')
+        print(json.dumps(relight_cfg, indent=2)[:1000])
+
     if args.test.relight_json is not None:
         was_deferredgs = bool(getattr(gaussians, 'use_deferredgs', False))
         relight_cfg = gaussians.load_deferred_lighting(args.test.relight_json)
@@ -253,6 +258,8 @@ if __name__ == "__main__":
     parser.add_argument('--cam_path', type=str, default=None)
     parser.add_argument('--pose_path', type=str, default=None)
     parser.add_argument('--relight_json', type=str, default=None)
+    parser.add_argument('--envmap_path', type=str, default=None)
+    parser.add_argument('--envmap_intensity', type=float, default=1.0)
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--test_speed', action='store_true')
@@ -261,6 +268,8 @@ if __name__ == "__main__":
     args = OmegaConf.load(pargs.config)
     args.data_dir, args.out_dir, args.model_dir, args.test.cam_path, args.test.pose_path = pargs.data_dir, pargs.out_dir, pargs.model_dir, pargs.cam_path, pargs.pose_path
     args.test.relight_json = pargs.relight_json
+    args.test.envmap_path = pargs.envmap_path
+    args.test.envmap_intensity = pargs.envmap_intensity
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed
     torch.backends.cuda.matmul.allow_tf32 = True

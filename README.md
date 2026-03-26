@@ -132,6 +132,28 @@ The relighting JSON contains:
 
 You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--relight_json`.
 
+#### Relighting with an environment map (new)
+
+You can directly use an equirectangular environment map (`.hdr/.exr/.png/.jpg`) as relighting input:
+
+```shell
+python test.py \
+  --config ./config/{DATASET}.yaml \
+  --model_dir {MODEL_DIR} \
+  --out_dir {RELIGHT_OUT_DIR} \
+  --data_dir {DATASET_DIR} \
+  --envmap_path {ENVMAP_FILE} \
+  --envmap_intensity 1.0 \
+  --save_deferred_buffers
+```
+
+The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
+
+For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
+- albedo from the model's SH0 color term (instead of fixed gray),
+- normal from local point-cloud PCA normals (instead of radial pseudo-normals),
+so exported albedo/normal buffers are more reasonable before any deferred finetuning.
+
 ## Visualization
 
 To visualize the results during training, open the viewer, set ip, port, and connect

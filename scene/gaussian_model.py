@@ -16,9 +16,24 @@ from gsplat import rasterization, quat_scale_to_covar_preci, spherical_harmonics
 from scene.mlp import MLP, vmap_mlp
 from utils.smpl_utils import smpl, interpolate_skinningfield, rigid_transform_tensor, rigid_transform_numba
 from utils.config_utils import Config
-from utils.sh_utils import RGB2SH
+from utils.sh_utils import RGB2SH, SH2RGB
 
 class GaussianModel:
+    @staticmethod
+    def _estimate_point_normals_from_xyz(xyz, k=8):
+        with torch.no_grad():
+            _, idxs, _ = knn_points(xyz[None], xyz[None], K=k+1)
+            nbr = xyz[idxs[0][:, 1:]]  # [N, k, 3]
+            mean = nbr.mean(dim=1, keepdim=True)
+            centered = nbr - mean
+            cov = torch.einsum('nki,nkj->nij', centered, centered) / max(1, k - 1)
+            eigvals, eigvecs = torch.linalg.eigh(cov)
+            normal = eigvecs[:, :, 0]
+            outward = xyz - xyz.mean(dim=0, keepdim=True)
+            flip = torch.sign((normal * outward).sum(dim=-1, keepdim=True)).clamp_min(0.0) * 2.0 - 1.0
+            normal = F.normalize(normal * flip, dim=-1)
+        return normal
+
 
     def setup_functions(self):
         
@@ -249,10 +264,14 @@ class GaussianModel:
         N = self._xyz.shape[0]
 
         if (not torch.is_tensor(self._albedo)) or self._albedo is None or self._albedo.numel() == 0:
-            init_albedo = self.inverse_color_activation(torch.full((N, 3), 0.5, device=device))
+            if torch.is_tensor(self._sh0) and self._sh0.numel() > 0:
+                init_albedo_rgb = torch.clamp(SH2RGB(self._sh0[:, 0]), 1e-4, 1.0 - 1e-4)
+            else:
+                init_albedo_rgb = torch.full((N, 3), 0.5, device=device)
+            init_albedo = self.inverse_color_activation(init_albedo_rgb)
             self._albedo = nn.Parameter(init_albedo.requires_grad_(True))
         if (not torch.is_tensor(self._normal)) or self._normal is None or self._normal.numel() == 0:
-            normal = F.normalize(self._xyz - self._xyz.mean(dim=0, keepdim=True), dim=-1)
+            normal = GaussianModel._estimate_point_normals_from_xyz(self._xyz)
             self._normal = nn.Parameter(normal.requires_grad_(True))
         if (not torch.is_tensor(self._roughness)) or self._roughness is None or self._roughness.numel() == 0:
             roughness = torch.full((N,), self.inverse_opacity_activation(torch.tensor(0.6, device=device)), device=device)
@@ -662,6 +681,38 @@ class GaussianModel:
         )
         return data
 
+    @torch.no_grad()
+    def load_envmap_lighting(self, envmap_path, intensity=1.0):
+        import imageio.v3 as iio
+
+        env = iio.imread(envmap_path).astype(np.float32)
+        if env.max() > 1.0:
+            env = env / 255.0
+        env = np.clip(env[..., :3], 0.0, None) * float(intensity)
+        H, W = env.shape[:2]
+
+        theta = (np.arange(H, dtype=np.float32) + 0.5) / H * np.pi
+        phi = (np.arange(W, dtype=np.float32) + 0.5) / W * (2.0 * np.pi)
+        theta, phi = np.meshgrid(theta, phi, indexing='ij')
+        x = np.sin(theta) * np.cos(phi)
+        y = np.sin(theta) * np.sin(phi)
+        z = np.cos(theta)
+        basis = np.stack([
+            np.ones_like(x), y, z, x, x * y, y * z, 3.0 * z * z - 1.0, x * z, x * x - y * y
+        ], axis=-1).reshape(-1, 9)
+        rgb = env.reshape(-1, 3)
+        weights = np.sin(theta).reshape(-1, 1)
+
+        bw = basis * weights
+        lhs = bw.T @ basis + np.eye(9, dtype=np.float32) * 1e-6
+        rhs = bw.T @ rgb
+        coeff = np.linalg.solve(lhs, rhs).astype(np.float32)
+
+        self._ensure_deferred_params()
+        self.use_deferredgs = True
+        self.set_deferred_lighting(light_sh=coeff, light_dc=np.zeros(3, dtype=np.float32))
+        return dict(light_sh=coeff.tolist(), light_dc=[0.0, 0.0, 0.0], envmap_path=envmap_path, intensity=float(intensity))
+
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
         N = xyz.shape[0]
@@ -680,7 +731,7 @@ class GaussianModel:
         shN = torch.zeros((N, 3, 3)).float().cuda()
         init_albedo = self.inverse_color_activation(torch.full((N, 3), init_color, device=xyz.device))
         albedo = init_albedo.float().cuda()
-        normal = F.normalize(xyz - xyz.mean(dim=0, keepdim=True), dim=-1)
+        normal = GaussianModel._estimate_point_normals_from_xyz(xyz)
         roughness = torch.full((N,), self.inverse_opacity_activation(torch.tensor(0.6, device=xyz.device))).float().cuda()
         specular = torch.full((N,), self.inverse_opacity_activation(torch.tensor(0.05, device=xyz.device))).float().cuda()
         xyz_offset = torch.zeros_like(xyz)
