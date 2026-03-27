@@ -100,8 +100,9 @@ def training(args: Config):
             n_geom = info.get('normal_geom', info['normal'])
             deferred_normal_consistency_loss = normal_cosine_loss(info['normal'], n_geom, mask=mask) * getattr(args, 'lambda_normal_consistency', 0.02)
             deferred_normal_smooth_loss = image_tv_loss(n_geom, mask=mask) * getattr(args, 'lambda_normal_smooth', 0.01)
-            deferred_normal_tv_loss = image_tv_loss(info['normal'], mask=mask) * getattr(args, 'lambda_normal_tv', 0.005)
-            deferred_rgb_tv_loss = image_tv_loss(image, mask=mask) * getattr(args, 'lambda_rgb_tv', 0.001)
+            # Disable the two additional TV losses to avoid instability (NaN/Inf).
+            deferred_normal_tv_loss = torch.tensor(0.0, device=image.device)
+            deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
             if 'depth' in info:
                 normal_depth = depth_to_normal(info['depth'], cam['K'], mask=mask)
                 deferred_depth_normal_loss = normal_cosine_loss(info['normal'], normal_depth, mask=mask) * getattr(args, 'lambda_depth_normal', 0.02)
