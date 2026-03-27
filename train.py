@@ -28,7 +28,7 @@ from scene.dataset import data_to_cam
 from scene.net_vis import Visualizer
 from utils.config_utils import Config
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, psnr, lpips_loss, dxyz_smooth_loss, gaussian_scaling_loss, normal_unit_loss, image_tv_loss
+from utils.loss_utils import l1_loss, psnr, lpips_loss, dxyz_smooth_loss, gaussian_scaling_loss, normal_unit_loss, normal_cosine_loss, charbonnier_tv_loss
 from utils.image_utils import crop_image
 
 def training(args: Config):
@@ -94,12 +94,18 @@ def training(args: Config):
         if getattr(args, 'use_deferredgs', False):
             deferred_normal_loss = normal_unit_loss(info['normal']) * getattr(args, 'lambda_deferred_normal', 0.0)
             n_geom = info.get('normal_geom', info['normal'])
-            deferred_normal_consistency_loss = l1_loss(info['normal'], n_geom) * getattr(args, 'lambda_normal_consistency', 0.05)
-            deferred_normal_smooth_loss = image_tv_loss(n_geom, mask) * getattr(args, 'lambda_normal_smooth', 0.02)
+            deferred_normal_consistency_loss = normal_cosine_loss(info['normal'], n_geom, mask=mask) * getattr(args, 'lambda_normal_consistency', 0.05)
+            deferred_normal_smooth_loss = charbonnier_tv_loss(n_geom, mask) * getattr(args, 'lambda_normal_smooth', 0.02)
             if mask.sum().item() > 0:
                 deferred_albedo_rgb_loss = l1_loss(info['albedo'][mask], image_gt[mask]) * getattr(args, 'lambda_albedo_rgb', 0.02)
 
         loss = l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss + deferred_normal_consistency_loss + deferred_normal_smooth_loss + deferred_albedo_rgb_loss
+        loss = torch.nan_to_num(loss, nan=0.0, posinf=1e3, neginf=1e3)
+        if not torch.isfinite(loss):
+            print(f'[WARN] Non-finite loss at iteration {iteration}, skip backward.')
+            for optimizer in gaussians.optimizers.values():
+                optimizer.zero_grad(set_to_none=True)
+            continue
 
         loss.backward()
 

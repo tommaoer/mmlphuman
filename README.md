@@ -105,8 +105,8 @@ lambda_albedo_rgb: 0.02
 ```
 
 For improving noisy normals / odd albedo in deferred training, these extra losses are enabled in code (with the defaults above):
-- `lambda_normal_consistency`: keep learned normal close to geometry normal.
-- `lambda_normal_smooth`: total-variation smoothing on geometry normal map.
+- `lambda_normal_consistency`: robust cosine normal-consistency loss between learned and geometry normals.
+- `lambda_normal_smooth`: Charbonnier-TV smoothing on geometry normal map.
 - `lambda_albedo_rgb`: weak foreground albedo-to-RGB correction.
 
 The deferred branch keeps the original training pipeline intact, so setting `use_deferredgs: false` restores the original SH-color rendering path.
