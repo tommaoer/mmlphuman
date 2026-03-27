@@ -31,7 +31,6 @@ def render_frame(gaussians: GaussianModel, cam, background):
 def save_deferred_buffers(info, out_dir, frame_id):
     os.makedirs(path.join(out_dir, 'albedo'), exist_ok=True)
     os.makedirs(path.join(out_dir, 'normal'), exist_ok=True)
-    os.makedirs(path.join(out_dir, 'normal_shading'), exist_ok=True)
     os.makedirs(path.join(out_dir, 'roughness'), exist_ok=True)
     os.makedirs(path.join(out_dir, 'specular'), exist_ok=True)
     os.makedirs(path.join(out_dir, 'alpha'), exist_ok=True)
@@ -41,23 +40,18 @@ def save_deferred_buffers(info, out_dir, frame_id):
 
     albedo = torch.clamp(info['albedo'], 0, 1)
     normal_src = info.get('normal_geom', info['normal'])
-    normal_shading_src = info.get('normal_shading', normal_src)
     normal = torch.clamp(normal_src * 0.5 + 0.5, 0, 1)
-    normal_shading = torch.clamp(normal_shading_src * 0.5 + 0.5, 0, 1)
     albedo[~confident.squeeze(-1)] = 0.0
     normal[~confident.squeeze(-1)] = 0.5
-    normal_shading[~confident.squeeze(-1)] = 0.5
 
     albedo = (albedo * 255).byte().contiguous().cpu().numpy()
     normal = (normal * 255).byte().contiguous().cpu().numpy()
-    normal_shading = (normal_shading * 255).byte().contiguous().cpu().numpy()
     roughness = (torch.clamp(info['roughness'], 0, 1).repeat(1, 1, 3) * 255).byte().contiguous().cpu().numpy()
     specular = (torch.clamp(info['specular'], 0, 1).repeat(1, 1, 3) * 255).byte().contiguous().cpu().numpy()
     alpha = (alpha.repeat(1, 1, 3) * 255).byte().contiguous().cpu().numpy()
 
     iio.imwrite(path.join(out_dir, 'albedo', f'{frame_id:08d}.png'), albedo)
     iio.imwrite(path.join(out_dir, 'normal', f'{frame_id:08d}.png'), normal)
-    iio.imwrite(path.join(out_dir, 'normal_shading', f'{frame_id:08d}.png'), normal_shading)
     iio.imwrite(path.join(out_dir, 'roughness', f'{frame_id:08d}.png'), roughness)
     iio.imwrite(path.join(out_dir, 'specular', f'{frame_id:08d}.png'), specular)
     iio.imwrite(path.join(out_dir, 'alpha', f'{frame_id:08d}.png'), alpha)

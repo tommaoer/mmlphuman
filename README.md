@@ -104,6 +104,11 @@ lambda_normal_smooth: 0.02
 lambda_albedo_rgb: 0.02
 ```
 
+For improving noisy normals / odd albedo in deferred training, these extra losses are enabled in code (with the defaults above):
+- `lambda_normal_consistency`: keep learned normal close to geometry normal.
+- `lambda_normal_smooth`: total-variation smoothing on geometry normal map.
+- `lambda_albedo_rgb`: weak foreground albedo-to-RGB correction.
+
 The deferred branch keeps the original training pipeline intact, so setting `use_deferredgs: false` restores the original SH-color rendering path.
 
 ### Post-training relighting
@@ -131,9 +136,8 @@ The relighting JSON contains:
 
 - `light_dc`: RGB ambient/base light.
 - `light_sh`: 9 RGB spherical-harmonic coefficients used by the deferred branch.
-- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `normal_shading/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
-  - `normal/` is exported from smoothed geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
-  - `normal_shading/` is the normal actually used by deferred shading.
+- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
+  - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
 
 You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--relight_json`.
 
