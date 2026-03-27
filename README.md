@@ -101,6 +101,9 @@ deferred_light_lr: 0.0005
 lambda_deferred_normal: 0.01
 lambda_normal_consistency: 0.02
 lambda_normal_smooth: 0.01
+lambda_normal_tv: 0.005
+lambda_rgb_tv: 0.001
+lambda_depth_normal: 0.02
 lambda_albedo_rgb: 0.02
 lambda_albedo_chroma: 0.03
 ```
@@ -108,6 +111,9 @@ lambda_albedo_chroma: 0.03
 For improving normal quality and albedo realism during deferred training:
 - `lambda_normal_consistency`: cosine consistency between learned and geometry normals.
 - `lambda_normal_smooth`: TV smoothness on geometry-normal map.
+- `lambda_normal_tv`: TV smoothness on rendered Gaussian normal map.
+- `lambda_rgb_tv`: weak TV regularization on final rendered RGB.
+- `lambda_depth_normal`: consistency between rendered normal and depth-derived normal.
 - `lambda_albedo_rgb`: weak RGB supervision for albedo on foreground.
 - `lambda_albedo_chroma`: chromaticity supervision to reduce illumination tint leakage in albedo.
 
@@ -155,10 +161,12 @@ python test.py \
   --data_dir {DATASET_DIR} \
   --envmap_path {ENVMAP_FILE} \
   --envmap_intensity 1.0 \
+  --save_light_envmap {OUT_LIGHT_ENVMAP_PNG} \
   --save_deferred_buffers
 ```
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
+`--save_light_envmap` exports the optimized/active SH lighting back to an equirectangular PNG for inspection.
 
 For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
 - albedo from the model's SH0 color term (instead of fixed gray),

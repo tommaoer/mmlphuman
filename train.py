@@ -28,7 +28,7 @@ from scene.dataset import data_to_cam
 from scene.net_vis import Visualizer
 from utils.config_utils import Config
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, psnr, lpips_loss, dxyz_smooth_loss, gaussian_scaling_loss, normal_unit_loss, normal_cosine_loss, image_tv_loss, albedo_chromaticity_loss
+from utils.loss_utils import l1_loss, psnr, lpips_loss, dxyz_smooth_loss, gaussian_scaling_loss, normal_unit_loss, normal_cosine_loss, image_tv_loss, albedo_chromaticity_loss, depth_to_normal
 from utils.image_utils import crop_image
 
 def training(args: Config):
@@ -90,6 +90,9 @@ def training(args: Config):
         deferred_normal_loss = torch.tensor(0.0, device=image.device)
         deferred_normal_consistency_loss = torch.tensor(0.0, device=image.device)
         deferred_normal_smooth_loss = torch.tensor(0.0, device=image.device)
+        deferred_normal_tv_loss = torch.tensor(0.0, device=image.device)
+        deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
+        deferred_depth_normal_loss = torch.tensor(0.0, device=image.device)
         deferred_albedo_rgb_loss = torch.tensor(0.0, device=image.device)
         deferred_albedo_chroma_loss = torch.tensor(0.0, device=image.device)
         if getattr(args, 'use_deferredgs', False):
@@ -97,11 +100,16 @@ def training(args: Config):
             n_geom = info.get('normal_geom', info['normal'])
             deferred_normal_consistency_loss = normal_cosine_loss(info['normal'], n_geom, mask=mask) * getattr(args, 'lambda_normal_consistency', 0.02)
             deferred_normal_smooth_loss = image_tv_loss(n_geom, mask=mask) * getattr(args, 'lambda_normal_smooth', 0.01)
+            deferred_normal_tv_loss = image_tv_loss(info['normal'], mask=mask) * getattr(args, 'lambda_normal_tv', 0.005)
+            deferred_rgb_tv_loss = image_tv_loss(image, mask=mask) * getattr(args, 'lambda_rgb_tv', 0.001)
+            if 'depth' in info:
+                normal_depth = depth_to_normal(info['depth'], cam['K'], mask=mask)
+                deferred_depth_normal_loss = normal_cosine_loss(info['normal'], normal_depth, mask=mask) * getattr(args, 'lambda_depth_normal', 0.02)
             if mask.sum().item() > 0:
                 deferred_albedo_rgb_loss = l1_loss(info['albedo'][mask], image_gt[mask]) * getattr(args, 'lambda_albedo_rgb', 0.02)
                 deferred_albedo_chroma_loss = albedo_chromaticity_loss(info['albedo'], image_gt, mask=mask) * getattr(args, 'lambda_albedo_chroma', 0.03)
 
-        loss = l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss + deferred_normal_consistency_loss + deferred_normal_smooth_loss + deferred_albedo_rgb_loss + deferred_albedo_chroma_loss
+        loss = l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss + deferred_normal_consistency_loss + deferred_normal_smooth_loss + deferred_normal_tv_loss + deferred_rgb_tv_loss + deferred_depth_normal_loss + deferred_albedo_rgb_loss + deferred_albedo_chroma_loss
         loss = torch.nan_to_num(loss, nan=0.0, posinf=1e3, neginf=1e3)
 
         loss.backward()
@@ -126,6 +134,9 @@ def training(args: Config):
             deferred_normal_loss=deferred_normal_loss,
             deferred_normal_consistency_loss=deferred_normal_consistency_loss,
             deferred_normal_smooth_loss=deferred_normal_smooth_loss,
+            deferred_normal_tv_loss=deferred_normal_tv_loss,
+            deferred_rgb_tv_loss=deferred_rgb_tv_loss,
+            deferred_depth_normal_loss=deferred_depth_normal_loss,
             deferred_albedo_rgb_loss=deferred_albedo_rgb_loss,
             deferred_albedo_chroma_loss=deferred_albedo_chroma_loss,
         )

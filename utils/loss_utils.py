@@ -89,3 +89,34 @@ def albedo_chromaticity_loss(albedo, rgb, mask=None, eps=1e-6):
         if valid.sum().item() > 0:
             diff = diff[valid]
     return torch.nan_to_num(diff, nan=0.0, posinf=1.0, neginf=1.0).mean()
+
+def depth_to_normal(depth, K, mask=None, eps=1e-6):
+    h, w = depth.shape[:2]
+    device = depth.device
+    ys, xs = torch.meshgrid(
+        torch.arange(h, device=device, dtype=depth.dtype),
+        torch.arange(w, device=device, dtype=depth.dtype),
+        indexing='ij'
+    )
+    fx, fy = K[0, 0], K[1, 1]
+    cx, cy = K[0, 2], K[1, 2]
+    z = depth[..., 0] if depth.ndim == 3 else depth
+    x = (xs - cx) / (fx + eps) * z
+    y = (ys - cy) / (fy + eps) * z
+    p = torch.stack([x, y, z], dim=-1)
+
+    n = torch.zeros_like(p)
+    dx = p[1:-1, 2:, :] - p[1:-1, :-2, :]
+    dy = p[2:, 1:-1, :] - p[:-2, 1:-1, :]
+    n_mid = torch.cross(dx, dy, dim=-1)
+    n_mid = F.normalize(n_mid, dim=-1, eps=eps)
+    n[1:-1, 1:-1] = n_mid
+    n[0] = n[1]
+    n[-1] = n[-2]
+    n[:, 0] = n[:, 1]
+    n[:, -1] = n[:, -2]
+    n = F.normalize(n, dim=-1, eps=eps)
+
+    if mask is not None:
+        n = torch.where(mask.unsqueeze(-1), n, torch.zeros_like(n))
+    return n

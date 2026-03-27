@@ -226,6 +226,9 @@ def testing(args: Config):
         if not was_deferredgs:
             print('Warning: checkpoint has no deferredGS flag; initialized deferred params from legacy checkpoint for relighting.')
         print(json.dumps(relight_cfg, indent=2))
+    if args.test.save_light_envmap is not None:
+        gaussians.export_deferred_envmap(args.test.save_light_envmap)
+        print(f'Exported optimized light envmap to: {args.test.save_light_envmap}')
 
     # Dataset
     test_frame_ids = np.arange(args.test.begin_ith_frame, args.test.begin_ith_frame+args.test.frame_interval*args.test.num_frame, args.test.frame_interval).tolist()
@@ -272,6 +275,7 @@ if __name__ == "__main__":
     parser.add_argument('--relight_json', type=str, default=None)
     parser.add_argument('--envmap_path', type=str, default=None)
     parser.add_argument('--envmap_intensity', type=float, default=1.0)
+    parser.add_argument('--save_light_envmap', type=str, default=None)
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--test_speed', action='store_true')
@@ -282,6 +286,7 @@ if __name__ == "__main__":
     args.test.relight_json = pargs.relight_json
     args.test.envmap_path = pargs.envmap_path
     args.test.envmap_intensity = pargs.envmap_intensity
+    args.test.save_light_envmap = pargs.save_light_envmap
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed
     torch.backends.cuda.matmul.allow_tf32 = True
