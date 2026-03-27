@@ -86,6 +86,7 @@ class GaussianModel:
         self.specular_bs = torch.empty(0)
 
         self.use_deferredgs = False
+        self.is_legacy_deferred = False
         self.deferred_light_sh = torch.empty(0)
         self.deferred_light_dc = torch.empty(0)
 
@@ -181,6 +182,7 @@ class GaussianModel:
             'is_dxyz_bs': self.is_dxyz_bs,
             'is_gsparam_bs': self.is_gsparam_bs,
             'use_deferredgs': self.use_deferredgs,
+            'is_legacy_deferred': self.is_legacy_deferred,
             'deferred_light_sh': self.deferred_light_sh,
             'deferred_light_dc': self.deferred_light_dc,
         }
@@ -243,11 +245,14 @@ class GaussianModel:
         self.is_dxyz_bs = loader('is_dxyz_bs')
         self.is_gsparam_bs = loader('is_gsparam_bs')
         self.use_deferredgs = loader('use_deferredgs')
+        self.is_legacy_deferred = loader('is_legacy_deferred')
         self.deferred_light_sh = loader('deferred_light_sh')
         self.deferred_light_dc = loader('deferred_light_dc')
 
         if self.use_deferredgs is None:
             self.use_deferredgs = False
+        if self.is_legacy_deferred is None:
+            self.is_legacy_deferred = not bool(self.use_deferredgs)
 
         self._ensure_deferred_params()
 
@@ -659,6 +664,14 @@ class GaussianModel:
         n = torch.where(alpha > 1e-3, n, torch.zeros_like(n))
         return n
 
+    def _smooth_normal_map(self, n, alpha):
+        data = n.permute(2, 0, 1)[None]
+        data = F.avg_pool2d(data, kernel_size=3, stride=1, padding=1)
+        data = data[0].permute(1, 2, 0)
+        data = F.normalize(data, dim=-1)
+        data = torch.where(alpha > 1e-3, data, torch.zeros_like(data))
+        return data
+
     def render_deferred(self, cam, background=None, scaling_modifier=1.0):
         covars = self.get_covariance(scaling_modifier)
         zeros3 = torch.zeros(3, device=self.get_xyz.device, dtype=self.get_xyz.dtype)
@@ -674,19 +687,29 @@ class GaussianModel:
         normal = F.normalize(normal / denom, dim=-1)
         xyz_map = xyz_map / denom
         normal_geom = self._compute_normal_from_xyz_map(xyz_map, alpha)
+        normal_geom = self._smooth_normal_map(normal_geom, alpha)
         albedo = torch.clamp(albedo / denom, 0.0, 1.0)
         roughness = torch.clamp(roughness / denom, 0.0, 1.0)
         specular = torch.clamp(specular / denom, 0.0, 1.0)
 
-        sh_basis = self._eval_sh9(normal)
+        if self.is_legacy_deferred:
+            normal_shading = normal_geom
+            specular = specular * 0.15
+        else:
+            normal_shading = F.normalize(0.6 * normal + 0.4 * normal_geom, dim=-1)
+
+        sh_basis = self._eval_sh9(normal_shading)
         diffuse_light = torch.einsum('hwc,ck->hwk', sh_basis, self.deferred_light_sh) + self.deferred_light_dc
         diffuse_light = torch.clamp_min(diffuse_light, 0.0)
+        if self.is_legacy_deferred:
+            diffuse_luma = diffuse_light.mean(dim=-1, keepdim=True).clamp_min(0.25)
+            albedo = torch.clamp(albedo / diffuse_luma, 0.0, 1.0)
 
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
         view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
         half_vec = F.normalize(view_dir + torch.tensor([0.0, 0.0, 1.0], device=view_dir.device), dim=-1)
         spec_pow = 4.0 + (1.0 - roughness) * 60.0
-        spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
+        spec_term = torch.clamp((normal_shading * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
         shaded = albedo * diffuse_light + specular * spec_term
         if background is not None:
             shaded = shaded * alpha + background[None, None] * (1.0 - alpha)
@@ -695,6 +718,7 @@ class GaussianModel:
             'albedo': albedo,
             'normal': normal,
             'normal_geom': normal_geom,
+            'normal_shading': normal_shading,
             'roughness': roughness,
             'specular': specular,
             'alpha': alpha,
@@ -839,6 +863,7 @@ class GaussianModel:
         xyz_ft = torch.as_tensor(xyz_ft).float().cuda()
         xyz_vt = torch.as_tensor(xyz_vt).float().cuda()
         self.dxyz_vt = nn.Parameter(torch.zeros_like(xyz_vt).float().cuda().requires_grad_(True))
+        self.is_legacy_deferred = False
 
         self.prepare_interpolating_weights(xyz_ft, xyz_vt)
 
