@@ -99,15 +99,7 @@ To enable it, set the following in a config:
 use_deferredgs: true
 deferred_light_lr: 0.0005
 lambda_deferred_normal: 0.01
-lambda_normal_consistency: 0.05
-lambda_normal_smooth: 0.02
-lambda_albedo_rgb: 0.02
 ```
-
-For improving noisy normals / odd albedo in deferred training, these extra losses are enabled in code (with the defaults above):
-- `lambda_normal_consistency`: robust cosine normal-consistency loss between learned and geometry normals.
-- `lambda_normal_smooth`: Charbonnier-TV smoothing on geometry normal map.
-- `lambda_albedo_rgb`: weak foreground albedo-to-RGB correction.
 
 The deferred branch keeps the original training pipeline intact, so setting `use_deferredgs: false` restores the original SH-color rendering path.
 
