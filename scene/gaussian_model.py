@@ -639,6 +639,26 @@ class GaussianModel:
         ], dim=-1)
         return basis
 
+    def _compute_normal_from_xyz_map(self, xyz_map, alpha):
+        h, w = xyz_map.shape[:2]
+        n = torch.zeros_like(xyz_map)
+        if h < 3 or w < 3:
+            return F.normalize(xyz_map, dim=-1)
+
+        dx = xyz_map[1:-1, 2:, :] - xyz_map[1:-1, :-2, :]
+        dy = xyz_map[2:, 1:-1, :] - xyz_map[:-2, 1:-1, :]
+        n_mid = torch.cross(dx, dy, dim=-1)
+        n_mid = F.normalize(n_mid, dim=-1)
+        n[1:-1, 1:-1, :] = n_mid
+        n[0] = n[1]
+        n[-1] = n[-2]
+        n[:, 0] = n[:, 1]
+        n[:, -1] = n[:, -2]
+
+        n = F.normalize(n, dim=-1)
+        n = torch.where(alpha > 1e-3, n, torch.zeros_like(n))
+        return n
+
     def render_deferred(self, cam, background=None, scaling_modifier=1.0):
         covars = self.get_covariance(scaling_modifier)
         zeros3 = torch.zeros(3, device=self.get_xyz.device, dtype=self.get_xyz.dtype)
@@ -646,11 +666,14 @@ class GaussianModel:
 
         albedo, alpha = self._render_feature(cam, self.get_cano_albedo, zeros3, covars)
         normal, _ = self._render_feature(cam, self.get_target_normal, zeros3, covars)
+        xyz_map, _ = self._render_feature(cam, self.get_xyz, zeros3, covars)
         roughness, _ = self._render_feature(cam, self.get_roughness[:, None], zeros1, covars)
         specular, _ = self._render_feature(cam, self.get_specular[:, None], zeros1, covars)
 
         denom = alpha.clamp_min(1e-6)
         normal = F.normalize(normal / denom, dim=-1)
+        xyz_map = xyz_map / denom
+        normal_geom = self._compute_normal_from_xyz_map(xyz_map, alpha)
         albedo = torch.clamp(albedo / denom, 0.0, 1.0)
         roughness = torch.clamp(roughness / denom, 0.0, 1.0)
         specular = torch.clamp(specular / denom, 0.0, 1.0)
@@ -660,7 +683,7 @@ class GaussianModel:
         diffuse_light = torch.clamp_min(diffuse_light, 0.0)
 
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
-        view_dir = F.normalize(cam_pos[None, None] - self._render_feature(cam, self.get_xyz, zeros3, covars)[0] / denom, dim=-1)
+        view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
         half_vec = F.normalize(view_dir + torch.tensor([0.0, 0.0, 1.0], device=view_dir.device), dim=-1)
         spec_pow = 4.0 + (1.0 - roughness) * 60.0
         spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
@@ -671,6 +694,7 @@ class GaussianModel:
         info = {
             'albedo': albedo,
             'normal': normal,
+            'normal_geom': normal_geom,
             'roughness': roughness,
             'specular': specular,
             'alpha': alpha,

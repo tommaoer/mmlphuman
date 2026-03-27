@@ -39,7 +39,8 @@ def save_deferred_buffers(info, out_dir, frame_id):
     confident = alpha > 0.6
 
     albedo = torch.clamp(info['albedo'], 0, 1)
-    normal = torch.clamp(info['normal'] * 0.5 + 0.5, 0, 1)
+    normal_src = info.get('normal_geom', info['normal'])
+    normal = torch.clamp(normal_src * 0.5 + 0.5, 0, 1)
     albedo[~confident.squeeze(-1)] = 0.0
     normal[~confident.squeeze(-1)] = 0.5
 
