@@ -50,3 +50,16 @@ def gaussian_scaling_loss(scaling, threshold=0.01):
 
 def normal_unit_loss(normal):
     return (torch.linalg.vector_norm(normal, dim=-1) - 1.0).abs().mean()
+
+def image_tv_loss(img, mask=None):
+    dx = img[:, 1:, :] - img[:, :-1, :]
+    dy = img[1:, :, :] - img[:-1, :, :]
+    if mask is not None:
+        mx = (mask[:, 1:] & mask[:, :-1]).unsqueeze(-1)
+        my = (mask[1:, :] & mask[:-1, :]).unsqueeze(-1)
+        if mx.sum().item() > 0:
+            dx = dx[mx]
+        if my.sum().item() > 0:
+            dy = dy[my]
+    loss = dx.abs().mean() + dy.abs().mean()
+    return loss

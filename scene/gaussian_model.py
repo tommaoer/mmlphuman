@@ -692,18 +692,11 @@ class GaussianModel:
         roughness = torch.clamp(roughness / denom, 0.0, 1.0)
         specular = torch.clamp(specular / denom, 0.0, 1.0)
 
-        if self.is_legacy_deferred:
-            normal_shading = normal_geom
-            specular = specular * 0.15
-        else:
-            normal_shading = F.normalize(0.6 * normal + 0.4 * normal_geom, dim=-1)
+        normal_shading = F.normalize(0.7 * normal + 0.3 * normal_geom, dim=-1)
 
         sh_basis = self._eval_sh9(normal_shading)
         diffuse_light = torch.einsum('hwc,ck->hwk', sh_basis, self.deferred_light_sh) + self.deferred_light_dc
         diffuse_light = torch.clamp_min(diffuse_light, 0.0)
-        if self.is_legacy_deferred:
-            diffuse_luma = diffuse_light.mean(dim=-1, keepdim=True).clamp_min(0.25)
-            albedo = torch.clamp(albedo / diffuse_luma, 0.0, 1.0)
 
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
         view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
