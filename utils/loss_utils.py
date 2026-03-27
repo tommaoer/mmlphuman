@@ -55,11 +55,18 @@ def image_tv_loss(img, mask=None):
     dx = img[:, 1:, :] - img[:, :-1, :]
     dy = img[1:, :, :] - img[:-1, :, :]
     if mask is not None:
-        mx = (mask[:, 1:] & mask[:, :-1]).unsqueeze(-1)
-        my = (mask[1:, :] & mask[:-1, :]).unsqueeze(-1)
+        mx = (mask[:, 1:] & mask[:, :-1]).unsqueeze(-1).float()
+        my = (mask[1:, :] & mask[:-1, :]).unsqueeze(-1).float()
+        dx_abs = dx.abs()
+        dy_abs = dy.abs()
         if mx.sum().item() > 0:
-            dx = dx[mx]
+            loss_x = (dx_abs * mx).sum() / (mx.sum() * dx_abs.shape[-1])
+        else:
+            loss_x = dx_abs.mean()
         if my.sum().item() > 0:
-            dy = dy[my]
+            loss_y = (dy_abs * my).sum() / (my.sum() * dy_abs.shape[-1])
+        else:
+            loss_y = dy_abs.mean()
+        return loss_x + loss_y
     loss = dx.abs().mean() + dy.abs().mean()
     return loss
