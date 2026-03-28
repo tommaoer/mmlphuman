@@ -103,9 +103,8 @@ def training(args: Config):
             deferred_normal_tv_loss = torch.tensor(0.0, device=image.device)
             deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
             deferred_depth_normal_loss = torch.tensor(0.0, device=image.device)
-            if mask.sum().item() > 0:
-                deferred_albedo_rgb_loss = l1_loss(info['albedo'][mask], image_gt[mask]) * getattr(args, 'lambda_albedo_rgb', 0.02)
-                deferred_albedo_chroma_loss = torch.tensor(0.0, device=image.device)
+            deferred_albedo_rgb_loss = torch.tensor(0.0, device=image.device)
+            deferred_albedo_chroma_loss = torch.tensor(0.0, device=image.device)
 
         loss = l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss + deferred_normal_consistency_loss + deferred_normal_smooth_loss + deferred_normal_tv_loss + deferred_rgb_tv_loss + deferred_depth_normal_loss + deferred_albedo_rgb_loss + deferred_albedo_chroma_loss
         loss = torch.nan_to_num(loss, nan=0.0, posinf=1e3, neginf=1e3)
