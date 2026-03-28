@@ -160,6 +160,10 @@ def training(args: Config):
             save_data = gaussians.capture()
             save_data['iteration'] = iteration
             torch.save(save_data, path.join(args.out_dir, 'chkpnt' + str(iteration) + '.pth'))
+            if getattr(args, 'use_deferredgs', False) and getattr(args, 'save_light_envmap', True):
+                envmap_path = path.join(args.out_dir, f'optimized_light_envmap_{iteration:07d}.png')
+                gaussians.export_deferred_envmap(envmap_path)
+                print(f"[ITER {iteration}] Saved optimized light envmap to: {envmap_path}")
 
 report_cnt = 0
 report_data = {}
