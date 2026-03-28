@@ -218,6 +218,10 @@ def testing(args: Config):
         relight_cfg = gaussians.load_envmap_lighting(args.test.envmap_path, args.test.envmap_intensity)
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
+    if getattr(args.test, 'save_light_envmap', False):
+        envmap_path = path.join(args.out_dir, 'optimized_light_envmap.png')
+        gaussians.export_deferred_envmap(envmap_path)
+        print(f'Saved optimized light envmap to: {envmap_path}')
 
     if args.test.relight_json is not None:
         was_deferredgs = bool(getattr(gaussians, 'use_deferredgs', False))
@@ -272,6 +276,7 @@ if __name__ == "__main__":
     parser.add_argument('--relight_json', type=str, default=None)
     parser.add_argument('--envmap_path', type=str, default=None)
     parser.add_argument('--envmap_intensity', type=float, default=1.0)
+    parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--test_speed', action='store_true')
@@ -282,6 +287,7 @@ if __name__ == "__main__":
     args.test.relight_json = pargs.relight_json
     args.test.envmap_path = pargs.envmap_path
     args.test.envmap_intensity = pargs.envmap_intensity
+    args.test.save_light_envmap = pargs.save_light_envmap
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed
     torch.backends.cuda.matmul.allow_tf32 = True

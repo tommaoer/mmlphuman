@@ -28,7 +28,17 @@ from scene.dataset import data_to_cam
 from scene.net_vis import Visualizer
 from utils.config_utils import Config
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, psnr, lpips_loss, dxyz_smooth_loss, gaussian_scaling_loss, normal_unit_loss
+from utils.loss_utils import (
+    l1_loss,
+    psnr,
+    lpips_loss,
+    dxyz_smooth_loss,
+    gaussian_scaling_loss,
+    normal_unit_loss,
+    image_tv_loss,
+    normal_cosine_loss,
+    depth_to_normal,
+)
 from utils.image_utils import crop_image
 
 def training(args: Config):
@@ -88,10 +98,23 @@ def training(args: Config):
         scaling_loss = args.lambda_scaling * gaussian_scaling_loss(gaussians.get_cano_scaling, args.scaling_threshold)
 
         deferred_normal_loss = torch.tensor(0.0, device=image.device)
+        deferred_albedo_loss = torch.tensor(0.0, device=image.device)
+        deferred_normal_tv_loss = torch.tensor(0.0, device=image.device)
+        deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
+        deferred_depth_normal_loss = torch.tensor(0.0, device=image.device)
         if getattr(args, 'use_deferredgs', False):
             deferred_normal_loss = normal_unit_loss(info['normal']) * getattr(args, 'lambda_deferred_normal', 0.0)
+            deferred_albedo_loss = l1_loss(info['albedo'], image_gt) * getattr(args, 'lambda_deferred_albedo', 0.01)
+            deferred_normal_tv_loss = image_tv_loss(info['normal'], mask=alpha) * getattr(args, 'lambda_deferred_normal_tv', 0.005)
+            deferred_rgb_tv_loss = image_tv_loss(image, mask=alpha) * getattr(args, 'lambda_deferred_rgb_tv', 0.002)
+            if 'depth' in info:
+                normal_from_depth = depth_to_normal(info['depth'].squeeze(-1), cam['K'])
+                deferred_depth_normal_loss = normal_cosine_loss(normal_from_depth, info['normal'], mask=alpha) * getattr(args, 'lambda_deferred_depth_normal', 0.01)
 
-        loss = l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss
+        loss = (
+            l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss
+            + deferred_albedo_loss + deferred_normal_tv_loss + deferred_rgb_tv_loss + deferred_depth_normal_loss
+        )
 
         loss.backward()
 
@@ -113,6 +136,10 @@ def training(args: Config):
             dxyzsmooth_loss=dxyzsmoothloss,
             scaling_loss=scaling_loss,
             deferred_normal_loss=deferred_normal_loss,
+            deferred_albedo_loss=deferred_albedo_loss,
+            deferred_normal_tv_loss=deferred_normal_tv_loss,
+            deferred_rgb_tv_loss=deferred_rgb_tv_loss,
+            deferred_depth_normal_loss=deferred_depth_normal_loss,
         )
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
 

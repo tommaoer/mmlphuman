@@ -50,3 +50,62 @@ def gaussian_scaling_loss(scaling, threshold=0.01):
 
 def normal_unit_loss(normal):
     return (torch.linalg.vector_norm(normal, dim=-1) - 1.0).abs().mean()
+
+def normal_cosine_loss(normal_a, normal_b, mask=None):
+    normal_a = F.normalize(normal_a, dim=-1)
+    normal_b = F.normalize(normal_b, dim=-1)
+    cos = (normal_a * normal_b).sum(dim=-1).clamp(-1.0, 1.0)
+    loss_map = 1.0 - cos
+    if mask is not None:
+        m = mask.squeeze(-1) if mask.dim() == 3 else mask
+        valid = m > 0.5
+        if valid.any():
+            return loss_map[valid].mean()
+    return loss_map.mean()
+
+def image_tv_loss(image, mask=None, eps=1e-6):
+    if image.shape[0] < 2 or image.shape[1] < 2:
+        return torch.tensor(0.0, device=image.device, dtype=image.dtype)
+    dx = image[1:, :, :] - image[:-1, :, :]
+    dy = image[:, 1:, :] - image[:, :-1, :]
+    tv_x = torch.sqrt((dx * dx).sum(dim=-1) + eps)
+    tv_y = torch.sqrt((dy * dy).sum(dim=-1) + eps)
+
+    if mask is not None:
+        m = mask.squeeze(-1) if mask.dim() == 3 else mask
+        mx = (m[1:, :] > 0.5) & (m[:-1, :] > 0.5)
+        my = (m[:, 1:] > 0.5) & (m[:, :-1] > 0.5)
+        loss_x = tv_x[mx].mean() if mx.any() else torch.tensor(0.0, device=image.device, dtype=image.dtype)
+        loss_y = tv_y[my].mean() if my.any() else torch.tensor(0.0, device=image.device, dtype=image.dtype)
+        return 0.5 * (loss_x + loss_y)
+    return 0.5 * (tv_x.mean() + tv_y.mean())
+
+def depth_to_normal(depth, cam_k):
+    h, w = depth.shape[:2]
+    yy, xx = torch.meshgrid(
+        torch.arange(h, device=depth.device, dtype=depth.dtype),
+        torch.arange(w, device=depth.device, dtype=depth.dtype),
+        indexing='ij'
+    )
+    fx = cam_k[0, 0]
+    fy = cam_k[1, 1]
+    cx = cam_k[0, 2]
+    cy = cam_k[1, 2]
+
+    x = (xx - cx) / fx * depth
+    y = (yy - cy) / fy * depth
+    xyz = torch.stack([x, y, depth], dim=-1)
+
+    n = torch.zeros_like(xyz)
+    if h < 3 or w < 3:
+        return F.normalize(xyz, dim=-1)
+    dx = xyz[1:-1, 2:, :] - xyz[1:-1, :-2, :]
+    dy = xyz[2:, 1:-1, :] - xyz[:-2, 1:-1, :]
+    n_mid = torch.cross(dx, dy, dim=-1)
+    n_mid = F.normalize(n_mid, dim=-1)
+    n[1:-1, 1:-1, :] = n_mid
+    n[0] = n[1]
+    n[-1] = n[-2]
+    n[:, 0] = n[:, 1]
+    n[:, -1] = n[:, -2]
+    return F.normalize(n, dim=-1)
