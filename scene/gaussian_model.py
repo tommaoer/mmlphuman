@@ -292,10 +292,10 @@ class GaussianModel:
             normal = GaussianModel._estimate_point_normals_from_xyz(self._xyz)
             self._normal = nn.Parameter(normal.requires_grad_(True))
         if (not torch.is_tensor(self._roughness)) or self._roughness is None or self._roughness.numel() == 0:
-            roughness = torch.full((N,), self.inverse_opacity_activation(torch.tensor(1.0 - 1e-3, device=device)), device=device)
+            roughness = torch.full((N,), self.inverse_opacity_activation(torch.tensor(0.6, device=device)), device=device)
             self._roughness = nn.Parameter(roughness.requires_grad_(True))
         if (not torch.is_tensor(self._specular)) or self._specular is None or self._specular.numel() == 0:
-            specular = torch.full((N,), self.inverse_opacity_activation(torch.tensor(1e-3, device=device)), device=device)
+            specular = torch.full((N,), self.inverse_opacity_activation(torch.tensor(0.05, device=device)), device=device)
             self._specular = nn.Parameter(specular.requires_grad_(True))
 
         if (not torch.is_tensor(self.albedo_bs)) or self.albedo_bs is None or self.albedo_bs.numel() == 0:
@@ -663,20 +663,16 @@ class GaussianModel:
         covars = self.get_covariance(scaling_modifier)
         zeros3 = torch.zeros(3, device=self.get_xyz.device, dtype=self.get_xyz.dtype)
         zeros1 = torch.zeros(1, device=self.get_xyz.device, dtype=self.get_xyz.dtype)
-        xyz_world = self.get_xyz
 
         albedo, alpha = self._render_feature(cam, self.get_cano_albedo, zeros3, covars)
         normal, _ = self._render_feature(cam, self.get_target_normal, zeros3, covars)
-        xyz_map, _ = self._render_feature(cam, xyz_world, zeros3, covars)
-        depth_vals = torch.einsum('ij,vj->vi', cam['w2c'][:3,:3], xyz_world)[:,2:3] + cam['w2c'][2,3]
-        depth_map, _ = self._render_feature(cam, depth_vals, zeros1, covars)
+        xyz_map, _ = self._render_feature(cam, self.get_xyz, zeros3, covars)
         roughness, _ = self._render_feature(cam, self.get_roughness[:, None], zeros1, covars)
         specular, _ = self._render_feature(cam, self.get_specular[:, None], zeros1, covars)
 
         denom = alpha.clamp_min(1e-6)
         normal = F.normalize(normal / denom, dim=-1)
         xyz_map = xyz_map / denom
-        depth_map = depth_map / denom
         normal_geom = self._compute_normal_from_xyz_map(xyz_map, alpha)
         albedo = torch.clamp(albedo / denom, 0.0, 1.0)
         roughness = torch.clamp(roughness / denom, 0.0, 1.0)
@@ -699,7 +695,6 @@ class GaussianModel:
             'albedo': albedo,
             'normal': normal,
             'normal_geom': normal_geom,
-            'depth': depth_map,
             'roughness': roughness,
             'specular': specular,
             'alpha': alpha,
@@ -760,24 +755,6 @@ class GaussianModel:
         self.set_deferred_lighting(light_sh=coeff, light_dc=np.zeros(3, dtype=np.float32))
         return dict(light_sh=coeff.tolist(), light_dc=[0.0, 0.0, 0.0], envmap_path=envmap_path, intensity=float(intensity))
 
-    @torch.no_grad()
-    def export_deferred_envmap(self, out_path, height=256, width=512):
-        import imageio.v3 as iio
-
-        ys = torch.arange(height, device=self.deferred_light_sh.device, dtype=self.deferred_light_sh.dtype)
-        xs = torch.arange(width, device=self.deferred_light_sh.device, dtype=self.deferred_light_sh.dtype)
-        theta = (ys[:, None] + 0.5) / height * np.pi
-        phi = (xs[None, :] + 0.5) / width * (2.0 * np.pi)
-        x = torch.sin(theta) * torch.cos(phi)
-        y = torch.sin(theta) * torch.sin(phi)
-        z = torch.cos(theta).expand_as(x)
-        n = torch.stack([x, y, z], dim=-1)
-        basis = self._eval_sh9(n)
-        env = torch.einsum('hwc,ck->hwk', basis, self.deferred_light_sh) + self.deferred_light_dc
-        env = torch.clamp(env, 0.0, 1.0).detach().cpu().numpy()
-        iio.imwrite(out_path, (env * 255).astype(np.uint8))
-        return out_path
-
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
         N = xyz.shape[0]
@@ -797,8 +774,8 @@ class GaussianModel:
         init_albedo = self.inverse_color_activation(torch.full((N, 3), init_color, device=xyz.device))
         albedo = init_albedo.float().cuda()
         normal = GaussianModel._estimate_point_normals_from_xyz(xyz)
-        roughness = torch.full((N,), self.inverse_opacity_activation(torch.tensor(1.0 - 1e-3, device=xyz.device))).float().cuda()
-        specular = torch.full((N,), self.inverse_opacity_activation(torch.tensor(1e-3, device=xyz.device))).float().cuda()
+        roughness = torch.full((N,), self.inverse_opacity_activation(torch.tensor(0.6, device=xyz.device))).float().cuda()
+        specular = torch.full((N,), self.inverse_opacity_activation(torch.tensor(0.05, device=xyz.device))).float().cuda()
         xyz_offset = torch.zeros_like(xyz)
 
         self._xyz = xyz
