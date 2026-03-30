@@ -121,6 +121,7 @@ python test.py \
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
 By default, an auto-rescale step normalizes mean luminance to `envmap_target_avg`; disable it with `--disable_envmap_auto_rescale`.
+By default, relighting uses diffuse-only shading to avoid inherited specular artifacts from checkpoints; use `--enable_specular_relight` to enable specular again.
 If `--save_light_envmap` is set, the envmap actually used for rendering is exported as `optimized_light_envmap.png`.
 
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
