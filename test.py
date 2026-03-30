@@ -228,11 +228,18 @@ def testing(args: Config):
         print(json.dumps(relight_cfg, indent=2)[:1000])
     if getattr(args.test, 'save_light_envmap', False):
         used_envmap_path = path.join(args.out_dir, 'optimized_light_envmap.png')
-        gaussians.export_deferred_envmap(used_envmap_path)
-        print(f'Saved relighting envmap (after rescale/intensity) to: {used_envmap_path}')
+        used_envmap_raw_path = path.join(args.out_dir, 'optimized_light_envmap.npy')
+        used_env = gaussians.export_deferred_envmap(used_envmap_path)
+        np.save(used_envmap_raw_path, used_env.astype(np.float32))
+        print(f'Saved relighting envmap preview (tone-mapped PNG) to: {used_envmap_path}')
+        print(f'Saved relighting envmap raw linear data to: {used_envmap_raw_path}')
         input_envmap_path = path.join(args.out_dir, 'input_light_envmap.png')
-        if gaussians.export_input_envmap(input_envmap_path) is not None:
-            print(f'Saved input envmap (before rescale/intensity) to: {input_envmap_path}')
+        input_envmap_raw_path = path.join(args.out_dir, 'input_light_envmap.npy')
+        input_env = gaussians.export_input_envmap(input_envmap_path)
+        if input_env is not None:
+            np.save(input_envmap_raw_path, input_env.astype(np.float32))
+            print(f'Saved input envmap preview (tone-mapped PNG) to: {input_envmap_path}')
+            print(f'Saved input envmap raw linear data to: {input_envmap_raw_path}')
 
     # Dataset
     test_frame_ids = np.arange(args.test.begin_ith_frame, args.test.begin_ith_frame+args.test.frame_interval*args.test.num_frame, args.test.frame_interval).tolist()

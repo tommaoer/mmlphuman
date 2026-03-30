@@ -838,8 +838,7 @@ class GaussianModel:
             env = np.einsum('hwc,ck->hwk', basis, light_sh) + light_dc[None, None]
             env = np.clip(env, 0.0, None)
 
-        import imageio.v3 as iio
-        iio.imwrite(output_path, np.clip(env * 255.0, 0, 255).astype(np.uint8))
+        self._write_envmap_preview(output_path, env)
         return env
 
     @torch.no_grad()
@@ -847,9 +846,16 @@ class GaussianModel:
         if (not torch.is_tensor(self.deferred_envmap_input)) or self.deferred_envmap_input.numel() == 0:
             return None
         env = self.deferred_envmap_input.detach().cpu().numpy()
-        import imageio.v3 as iio
-        iio.imwrite(output_path, np.clip(env * 255.0, 0, 255).astype(np.uint8))
+        self._write_envmap_preview(output_path, env)
         return env
+
+    def _write_envmap_preview(self, output_path, env):
+        env = np.clip(env, 0.0, None)
+        # Save PNG as tone-mapped preview (HDR linear values can look almost black in naive 8-bit export).
+        env_tm = env / (1.0 + env)
+        env_tm = np.power(np.clip(env_tm, 0.0, 1.0), 1.0 / 2.2)
+        import imageio.v3 as iio
+        iio.imwrite(output_path, np.clip(env_tm * 255.0, 0, 255).astype(np.uint8))
 
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
