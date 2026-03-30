@@ -28,7 +28,17 @@ from scene.dataset import data_to_cam
 from scene.net_vis import Visualizer
 from utils.config_utils import Config
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, psnr, lpips_loss, dxyz_smooth_loss, gaussian_scaling_loss, normal_unit_loss, normal_cosine_loss, image_tv_loss, albedo_chromaticity_loss, depth_to_normal
+from utils.loss_utils import (
+    l1_loss,
+    psnr,
+    lpips_loss,
+    dxyz_smooth_loss,
+    gaussian_scaling_loss,
+    normal_unit_loss,
+    image_tv_loss,
+    normal_cosine_loss,
+    depth_to_normal,
+)
 from utils.image_utils import crop_image
 
 def training(args: Config):
@@ -88,27 +98,29 @@ def training(args: Config):
         scaling_loss = args.lambda_scaling * gaussian_scaling_loss(gaussians.get_cano_scaling, args.scaling_threshold)
 
         deferred_normal_loss = torch.tensor(0.0, device=image.device)
-        deferred_normal_consistency_loss = torch.tensor(0.0, device=image.device)
-        deferred_normal_smooth_loss = torch.tensor(0.0, device=image.device)
+        deferred_albedo_loss = torch.tensor(0.0, device=image.device)
         deferred_normal_tv_loss = torch.tensor(0.0, device=image.device)
         deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
         deferred_depth_normal_loss = torch.tensor(0.0, device=image.device)
-        deferred_albedo_rgb_loss = torch.tensor(0.0, device=image.device)
-        deferred_albedo_chroma_loss = torch.tensor(0.0, device=image.device)
         if getattr(args, 'use_deferredgs', False):
-            deferred_normal_loss = normal_unit_loss(info['normal']) * getattr(args, 'lambda_deferred_normal', 0.0)
-            n_geom = info.get('normal_geom', info['normal'])
-            deferred_normal_consistency_loss = normal_cosine_loss(info['normal'], n_geom, mask=mask) * getattr(args, 'lambda_normal_consistency', 0.02)
-            deferred_normal_smooth_loss = image_tv_loss(n_geom, mask=mask) * getattr(args, 'lambda_normal_smooth', 0.01)
-            deferred_normal_tv_loss = torch.tensor(0.0, device=image.device)
-            deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
-            deferred_depth_normal_loss = torch.tensor(0.0, device=image.device)
-            if mask.sum().item() > 0:
-                deferred_albedo_rgb_loss = l1_loss(info['albedo'][mask], image_gt[mask]) * getattr(args, 'lambda_albedo_rgb', 0.02)
-                deferred_albedo_chroma_loss = torch.tensor(0.0, device=image.device)
+            lambda_deferred_normal = getattr(args, 'lambda_deferred_normal', getattr(args, 'lambda_normal_smooth', 0.0))
+            lambda_deferred_albedo = getattr(args, 'lambda_deferred_albedo', getattr(args, 'lambda_albedo_rgb', 0.01))
+            lambda_deferred_normal_tv = getattr(args, 'lambda_deferred_normal_tv', getattr(args, 'lambda_normal_tv', 0.001))
+            lambda_deferred_rgb_tv = getattr(args, 'lambda_deferred_rgb_tv', getattr(args, 'lambda_rgb_tv', 0.0005))
+            lambda_deferred_depth_normal = getattr(args, 'lambda_deferred_depth_normal', getattr(args, 'lambda_depth_normal', getattr(args, 'lambda_normal_consistency', 0.01)))
 
-        loss = l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss + deferred_normal_consistency_loss + deferred_normal_smooth_loss + deferred_normal_tv_loss + deferred_rgb_tv_loss + deferred_depth_normal_loss + deferred_albedo_rgb_loss + deferred_albedo_chroma_loss
-        loss = torch.nan_to_num(loss, nan=0.0, posinf=1e3, neginf=1e3)
+            deferred_normal_loss = normal_unit_loss(info['normal']) * lambda_deferred_normal
+            deferred_albedo_loss = l1_loss(info['albedo'], image_gt) * lambda_deferred_albedo
+            deferred_normal_tv_loss = image_tv_loss(info['normal'], mask=alpha) * lambda_deferred_normal_tv
+            deferred_rgb_tv_loss = image_tv_loss(image, mask=alpha) * lambda_deferred_rgb_tv
+            if 'depth' in info:
+                normal_from_depth = depth_to_normal(info['depth'].squeeze(-1), cam['K'])
+                deferred_depth_normal_loss = normal_cosine_loss(normal_from_depth, info['normal'], mask=alpha) * lambda_deferred_depth_normal
+
+        loss = (
+            l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss
+            + deferred_albedo_loss + deferred_normal_tv_loss + deferred_rgb_tv_loss + deferred_depth_normal_loss
+        )
 
         loss.backward()
 
@@ -130,13 +142,10 @@ def training(args: Config):
             dxyzsmooth_loss=dxyzsmoothloss,
             scaling_loss=scaling_loss,
             deferred_normal_loss=deferred_normal_loss,
-            deferred_normal_consistency_loss=deferred_normal_consistency_loss,
-            deferred_normal_smooth_loss=deferred_normal_smooth_loss,
+            deferred_albedo_loss=deferred_albedo_loss,
             deferred_normal_tv_loss=deferred_normal_tv_loss,
             deferred_rgb_tv_loss=deferred_rgb_tv_loss,
             deferred_depth_normal_loss=deferred_depth_normal_loss,
-            deferred_albedo_rgb_loss=deferred_albedo_rgb_loss,
-            deferred_albedo_chroma_loss=deferred_albedo_chroma_loss,
         )
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
 
@@ -157,6 +166,10 @@ def training(args: Config):
             save_data = gaussians.capture()
             save_data['iteration'] = iteration
             torch.save(save_data, path.join(args.out_dir, 'chkpnt' + str(iteration) + '.pth'))
+            if getattr(args, 'use_deferredgs', False) and getattr(args, 'save_light_envmap', True):
+                envmap_path = path.join(args.out_dir, f'optimized_light_envmap_{iteration:07d}.png')
+                gaussians.export_deferred_envmap(envmap_path)
+                print(f"[ITER {iteration}] Saved optimized light envmap to: {envmap_path}")
 
 report_cnt = 0
 report_data = {}

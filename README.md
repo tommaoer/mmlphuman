@@ -99,57 +99,11 @@ To enable it, set the following in a config:
 use_deferredgs: true
 deferred_light_lr: 0.0005
 lambda_deferred_normal: 0.01
-lambda_normal_consistency: 0.02
-lambda_normal_smooth: 0.01
-lambda_normal_tv: 0.005
-lambda_rgb_tv: 0.001
-lambda_depth_normal: 0.02
-lambda_albedo_rgb: 0.02
-lambda_albedo_chroma: 0.03
 ```
-
-For improving normal quality and albedo realism during deferred training:
-- `lambda_normal_consistency`: cosine consistency between learned and geometry normals.
-- `lambda_normal_smooth`: TV smoothness on geometry-normal map.
-- `lambda_normal_tv`: TV smoothness on rendered Gaussian normal map.
-- `lambda_rgb_tv`: weak TV regularization on final rendered RGB.
-- `lambda_depth_normal`: consistency between rendered normal and depth-derived normal.
-- `lambda_albedo_rgb`: weak RGB supervision for albedo on foreground.
-- `lambda_albedo_chroma`: chromaticity supervision to reduce illumination tint leakage in albedo.
 
 The deferred branch keeps the original training pipeline intact, so setting `use_deferredgs: false` restores the original SH-color rendering path.
 
-### Post-training relighting
-
-If the checkpoint was trained with `use_deferredgs: true`, you can relight it at test time by overriding the learned deferred lighting:
-
-```shell
-python test.py \
-  --config ./config/{DATASET}.yaml \
-  --model_dir {MODEL_DIR} \
-  --out_dir {RELIGHT_OUT_DIR} \
-  --data_dir {DATASET_DIR} \
-  --relight_json ./assets/relight_three_point.json \
-  --save_deferred_buffers
-```
-
-The relighting JSON contains:
-
-```json
-{
-  "light_dc": [0.55, 0.52, 0.50],
-  "light_sh": [[... 9 rows total ...]]
-}
-```
-
-- `light_dc`: RGB ambient/base light.
-- `light_sh`: 9 RGB spherical-harmonic coefficients used by the deferred branch.
-- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
-  - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
-
-You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--relight_json`.
-
-#### Relighting with an environment map (new)
+### Post-training relighting with an environment map
 
 You can directly use an equirectangular environment map (`.hdr/.exr/.png/.jpg`) as relighting input:
 
@@ -161,12 +115,17 @@ python test.py \
   --data_dir {DATASET_DIR} \
   --envmap_path {ENVMAP_FILE} \
   --envmap_intensity 1.0 \
-  --save_light_envmap {OUT_LIGHT_ENVMAP_PNG} \
+  --envmap_target_avg 0.5 \
   --save_deferred_buffers
 ```
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
-`--save_light_envmap` exports the optimized/active SH lighting back to an equirectangular PNG for inspection.
+By default, an auto-rescale step normalizes mean luminance to `envmap_target_avg`; disable it with `--disable_envmap_auto_rescale`.
+By default, relighting uses diffuse-only shading to avoid inherited specular artifacts from checkpoints; use `--enable_specular_relight` to enable specular again.
+If `--save_light_envmap` is set, the envmap actually used for rendering is exported as `optimized_light_envmap.png`.
+
+- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
+  - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
 
 For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
 - albedo from the model's SH0 color term (instead of fixed gray),
