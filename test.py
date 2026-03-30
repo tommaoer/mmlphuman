@@ -210,6 +210,8 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save
 def testing(args: Config):
     init_smpl_pose()
 
+    os.makedirs(args.out_dir, exist_ok=True)
+
     gaussians = load_model(args.model_dir)
     gaussians.is_test = args.test.is_test
     gaussians.prepare_test()
