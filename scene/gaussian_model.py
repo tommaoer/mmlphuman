@@ -767,13 +767,18 @@ class GaussianModel:
         import imageio.v3 as iio
 
         env_raw = iio.imread(envmap_path)
+        raw_min = float(np.min(env_raw))
+        raw_max = float(np.max(env_raw))
+        raw_mean = float(np.mean(env_raw))
         if np.issubdtype(env_raw.dtype, np.integer):
             # LDR integer formats (png/jpg/...) are normalized to [0,1].
             maxv = float(np.iinfo(env_raw.dtype).max)
             env = env_raw.astype(np.float32) / max(maxv, 1.0)
+            input_kind = 'ldr_integer'
         else:
             # HDR float formats (hdr/exr/...) are already linear radiance; keep absolute scale.
             env = env_raw.astype(np.float32)
+            input_kind = 'hdr_float'
         env = np.clip(env[..., :3], 0.0, None)
         env_input = env.copy()
         applied_rescale = 1.0
@@ -819,6 +824,11 @@ class GaussianModel:
             rescale_factor=float(applied_rescale),
             target_avg=float(target_avg),
             diffuse_mode=self.envmap_diffuse_mode,
+            input_kind=input_kind,
+            raw_dtype=str(env_raw.dtype),
+            raw_min=raw_min,
+            raw_max=raw_max,
+            raw_mean=raw_mean,
             input_envmap_mean=float(env_input.mean()),
             output_envmap_mean=float(env.mean()),
         )
