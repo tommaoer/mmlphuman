@@ -90,7 +90,6 @@ class GaussianModel:
         self.deferred_light_dc = torch.empty(0)
         self.use_direct_envmap = False
         self.deferred_envmap = torch.empty(0)
-        self.force_diffuse_shading = False
 
         # lbs weights
         self._weights = None
@@ -693,12 +692,8 @@ class GaussianModel:
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
         view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
         half_vec = F.normalize(view_dir + torch.tensor([0.0, 0.0, 1.0], device=view_dir.device), dim=-1)
-        if bool(getattr(self, 'force_diffuse_shading', False)):
-            spec_term = torch.zeros_like(alpha)
-            specular = torch.zeros_like(specular)
-        else:
-            spec_pow = 4.0 + (1.0 - roughness) * 60.0
-            spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
+        spec_pow = 4.0 + (1.0 - roughness) * 60.0
+        spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
         shaded = albedo * diffuse_light + specular * spec_term
         if background is not None:
             shaded = shaded * alpha + background[None, None] * (1.0 - alpha)
