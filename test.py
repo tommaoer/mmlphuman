@@ -222,6 +222,7 @@ def testing(args: Config):
             args.test.envmap_intensity,
             auto_rescale=(not getattr(args.test, 'disable_envmap_auto_rescale', False)),
             target_avg=getattr(args.test, 'envmap_target_avg', 0.5),
+            diffuse_mode=getattr(args.test, 'envmap_diffuse_mode', 'direct'),
         )
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
@@ -276,6 +277,7 @@ if __name__ == "__main__":
     parser.add_argument('--envmap_intensity', type=float, default=1.0)
     parser.add_argument('--disable_envmap_auto_rescale', action='store_true')
     parser.add_argument('--envmap_target_avg', type=float, default=0.5)
+    parser.add_argument('--envmap_diffuse_mode', type=str, default='direct', choices=['direct', 'sh'])
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
@@ -288,6 +290,7 @@ if __name__ == "__main__":
     args.test.envmap_intensity = pargs.envmap_intensity
     args.test.disable_envmap_auto_rescale = pargs.disable_envmap_auto_rescale
     args.test.envmap_target_avg = pargs.envmap_target_avg
+    args.test.envmap_diffuse_mode = pargs.envmap_diffuse_mode
     args.test.save_light_envmap = pargs.save_light_envmap
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed

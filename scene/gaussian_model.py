@@ -89,6 +89,7 @@ class GaussianModel:
         self.deferred_light_sh = torch.empty(0)
         self.deferred_light_dc = torch.empty(0)
         self.use_direct_envmap = False
+        self.envmap_diffuse_mode = 'direct'
         self.deferred_envmap = torch.empty(0)
 
         # lbs weights
@@ -682,7 +683,16 @@ class GaussianModel:
         roughness = torch.clamp(roughness / denom, 0.0, 1.0)
         specular = torch.clamp(specular / denom, 0.0, 1.0)
 
-        if bool(getattr(self, 'use_direct_envmap', False)) and torch.is_tensor(self.deferred_envmap) and self.deferred_envmap.numel() > 0:
+        use_direct = (
+            bool(getattr(self, 'use_direct_envmap', False))
+            and torch.is_tensor(self.deferred_envmap)
+            and self.deferred_envmap.numel() > 0
+        )
+        diffuse_mode = str(getattr(self, 'envmap_diffuse_mode', 'direct')).lower()
+        if diffuse_mode not in ('direct', 'sh'):
+            diffuse_mode = 'direct'
+
+        if use_direct and diffuse_mode == 'direct':
             diffuse_light = self._sample_envmap(normal)
         else:
             sh_basis = self._eval_sh9(normal)
@@ -733,6 +743,7 @@ class GaussianModel:
             light_dc = torch.as_tensor(light_dc, dtype=self.deferred_light_dc.dtype, device=self.deferred_light_dc.device)
             self.deferred_light_dc.copy_(light_dc.reshape_as(self.deferred_light_dc))
         self.use_direct_envmap = False
+        self.envmap_diffuse_mode = 'sh'
         self.deferred_envmap = torch.empty(0, device=self.deferred_light_sh.device, dtype=self.deferred_light_sh.dtype)
         self.cache_dict = {}
 
@@ -750,7 +761,7 @@ class GaussianModel:
         return data
 
     @torch.no_grad()
-    def load_envmap_lighting(self, envmap_path, intensity=1.0, auto_rescale=True, target_avg=0.5):
+    def load_envmap_lighting(self, envmap_path, intensity=1.0, auto_rescale=True, target_avg=0.5, diffuse_mode='direct'):
         import imageio.v3 as iio
 
         env = iio.imread(envmap_path).astype(np.float32)
@@ -787,7 +798,8 @@ class GaussianModel:
         self._ensure_deferred_params()
         self.use_deferredgs = True
         self.set_deferred_lighting(light_sh=coeff, light_dc=np.zeros(3, dtype=np.float32))
-        self.use_direct_envmap = True
+        self.envmap_diffuse_mode = str(diffuse_mode).lower()
+        self.use_direct_envmap = self.envmap_diffuse_mode == 'direct'
         self.deferred_envmap = torch.as_tensor(env, dtype=self.deferred_light_sh.dtype, device=self.deferred_light_sh.device)
         return dict(
             light_sh=coeff.tolist(),
@@ -797,6 +809,7 @@ class GaussianModel:
             auto_rescale=bool(auto_rescale),
             rescale_factor=float(applied_rescale),
             target_avg=float(target_avg),
+            diffuse_mode=self.envmap_diffuse_mode,
         )
 
     @torch.no_grad()

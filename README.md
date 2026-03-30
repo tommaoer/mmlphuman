@@ -116,11 +116,13 @@ python test.py \
   --envmap_path {ENVMAP_FILE} \
   --envmap_intensity 1.0 \
   --envmap_target_avg 0.5 \
+  --envmap_diffuse_mode direct \
   --save_deferred_buffers
 ```
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
 By default, an auto-rescale step normalizes mean luminance to `envmap_target_avg`; disable it with `--disable_envmap_auto_rescale`.
+Use `--envmap_diffuse_mode direct` to sample diffuse light directly from the envmap (preserves high-frequency details), or `--envmap_diffuse_mode sh` to use SH-only diffuse lighting (smoother/low-frequency).
 If `--save_light_envmap` is set, the envmap actually used for rendering is exported as `optimized_light_envmap.png`.
 
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
