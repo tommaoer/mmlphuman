@@ -88,6 +88,7 @@ class GaussianModel:
         self.use_deferredgs = False
         self.deferred_light_sh = torch.empty(0)
         self.deferred_light_dc = torch.empty(0)
+        self.enable_specular_relight = False
         self.use_direct_envmap = False
         self.envmap_diffuse_mode = 'direct'
         self.deferred_envmap_input = torch.empty(0)
@@ -703,9 +704,13 @@ class GaussianModel:
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
         view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
         half_vec = F.normalize(view_dir + torch.tensor([0.0, 0.0, 1.0], device=view_dir.device), dim=-1)
-        spec_pow = 4.0 + (1.0 - roughness) * 60.0
-        spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
-        shaded = albedo * diffuse_light + specular * spec_term
+        if bool(getattr(self, 'enable_specular_relight', False)):
+            spec_pow = 4.0 + (1.0 - roughness) * 60.0
+            spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
+            specular_term = specular * spec_term
+        else:
+            specular_term = torch.zeros_like(albedo)
+        shaded = albedo * diffuse_light + specular_term
         if background is not None:
             shaded = shaded * alpha + background[None, None] * (1.0 - alpha)
 

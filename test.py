@@ -214,6 +214,7 @@ def testing(args: Config):
 
     gaussians = load_model(args.model_dir)
     gaussians.is_test = args.test.is_test
+    gaussians.enable_specular_relight = bool(getattr(args.test, 'enable_specular_relight', False))
     gaussians.prepare_test()
     background = torch.as_tensor(np.array(args.background)).float().cuda()
     if args.test.envmap_path is not None:
@@ -288,6 +289,7 @@ if __name__ == "__main__":
     parser.add_argument('--disable_envmap_auto_rescale', action='store_true')
     parser.add_argument('--envmap_target_avg', type=float, default=0.5)
     parser.add_argument('--envmap_diffuse_mode', type=str, default='direct', choices=['direct', 'sh'])
+    parser.add_argument('--enable_specular_relight', action='store_true')
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
@@ -301,6 +303,7 @@ if __name__ == "__main__":
     args.test.disable_envmap_auto_rescale = pargs.disable_envmap_auto_rescale
     args.test.envmap_target_avg = pargs.envmap_target_avg
     args.test.envmap_diffuse_mode = pargs.envmap_diffuse_mode
+    args.test.enable_specular_relight = pargs.enable_specular_relight
     args.test.save_light_envmap = pargs.save_light_envmap
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed
