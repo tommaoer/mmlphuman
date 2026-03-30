@@ -227,9 +227,12 @@ def testing(args: Config):
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
     if getattr(args.test, 'save_light_envmap', False):
-        envmap_path = path.join(args.out_dir, 'optimized_light_envmap.png')
-        gaussians.export_deferred_envmap(envmap_path)
-        print(f'Saved optimized light envmap to: {envmap_path}')
+        used_envmap_path = path.join(args.out_dir, 'optimized_light_envmap.png')
+        gaussians.export_deferred_envmap(used_envmap_path)
+        print(f'Saved relighting envmap (after rescale/intensity) to: {used_envmap_path}')
+        input_envmap_path = path.join(args.out_dir, 'input_light_envmap.png')
+        if gaussians.export_input_envmap(input_envmap_path) is not None:
+            print(f'Saved input envmap (before rescale/intensity) to: {input_envmap_path}')
 
     # Dataset
     test_frame_ids = np.arange(args.test.begin_ith_frame, args.test.begin_ith_frame+args.test.frame_interval*args.test.num_frame, args.test.frame_interval).tolist()

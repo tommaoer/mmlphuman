@@ -90,6 +90,7 @@ class GaussianModel:
         self.deferred_light_dc = torch.empty(0)
         self.use_direct_envmap = False
         self.envmap_diffuse_mode = 'direct'
+        self.deferred_envmap_input = torch.empty(0)
         self.deferred_envmap = torch.empty(0)
 
         # lbs weights
@@ -744,6 +745,7 @@ class GaussianModel:
             self.deferred_light_dc.copy_(light_dc.reshape_as(self.deferred_light_dc))
         self.use_direct_envmap = False
         self.envmap_diffuse_mode = 'sh'
+        self.deferred_envmap_input = torch.empty(0, device=self.deferred_light_sh.device, dtype=self.deferred_light_sh.dtype)
         self.deferred_envmap = torch.empty(0, device=self.deferred_light_sh.device, dtype=self.deferred_light_sh.dtype)
         self.cache_dict = {}
 
@@ -768,6 +770,7 @@ class GaussianModel:
         if env.max() > 1.0:
             env = env / 255.0
         env = np.clip(env[..., :3], 0.0, None)
+        env_input = env.copy()
         applied_rescale = 1.0
         if auto_rescale:
             lum = 0.2126 * env[..., 0] + 0.7152 * env[..., 1] + 0.0722 * env[..., 2]
@@ -800,6 +803,7 @@ class GaussianModel:
         self.set_deferred_lighting(light_sh=coeff, light_dc=np.zeros(3, dtype=np.float32))
         self.envmap_diffuse_mode = str(diffuse_mode).lower()
         self.use_direct_envmap = self.envmap_diffuse_mode == 'direct'
+        self.deferred_envmap_input = torch.as_tensor(env_input, dtype=self.deferred_light_sh.dtype, device=self.deferred_light_sh.device)
         self.deferred_envmap = torch.as_tensor(env, dtype=self.deferred_light_sh.dtype, device=self.deferred_light_sh.device)
         return dict(
             light_sh=coeff.tolist(),
@@ -810,6 +814,8 @@ class GaussianModel:
             rescale_factor=float(applied_rescale),
             target_avg=float(target_avg),
             diffuse_mode=self.envmap_diffuse_mode,
+            input_envmap_mean=float(env_input.mean()),
+            output_envmap_mean=float(env.mean()),
         )
 
     @torch.no_grad()
@@ -832,6 +838,15 @@ class GaussianModel:
             env = np.einsum('hwc,ck->hwk', basis, light_sh) + light_dc[None, None]
             env = np.clip(env, 0.0, None)
 
+        import imageio.v3 as iio
+        iio.imwrite(output_path, np.clip(env * 255.0, 0, 255).astype(np.uint8))
+        return env
+
+    @torch.no_grad()
+    def export_input_envmap(self, output_path):
+        if (not torch.is_tensor(self.deferred_envmap_input)) or self.deferred_envmap_input.numel() == 0:
+            return None
+        env = self.deferred_envmap_input.detach().cpu().numpy()
         import imageio.v3 as iio
         iio.imwrite(output_path, np.clip(env * 255.0, 0, 255).astype(np.uint8))
         return env
