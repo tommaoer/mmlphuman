@@ -103,37 +103,7 @@ lambda_deferred_normal: 0.01
 
 The deferred branch keeps the original training pipeline intact, so setting `use_deferredgs: false` restores the original SH-color rendering path.
 
-### Post-training relighting
-
-If the checkpoint was trained with `use_deferredgs: true`, you can relight it at test time by overriding the learned deferred lighting:
-
-```shell
-python test.py \
-  --config ./config/{DATASET}.yaml \
-  --model_dir {MODEL_DIR} \
-  --out_dir {RELIGHT_OUT_DIR} \
-  --data_dir {DATASET_DIR} \
-  --relight_json ./assets/relight_three_point.json \
-  --save_deferred_buffers
-```
-
-The relighting JSON contains:
-
-```json
-{
-  "light_dc": [0.55, 0.52, 0.50],
-  "light_sh": [[... 9 rows total ...]]
-}
-```
-
-- `light_dc`: RGB ambient/base light.
-- `light_sh`: 9 RGB spherical-harmonic coefficients used by the deferred branch.
-- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
-  - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
-
-You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--relight_json`.
-
-#### Relighting with an environment map (new)
+### Post-training relighting with an environment map
 
 You can directly use an equirectangular environment map (`.hdr/.exr/.png/.jpg`) as relighting input:
 
@@ -151,7 +121,10 @@ python test.py \
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
 By default, an auto-rescale step normalizes mean luminance to `envmap_target_avg`; disable it with `--disable_envmap_auto_rescale`.
-If `--save_light_envmap` is set, the current SH lighting is exported as `optimized_light_envmap_from_current_sh.png`.
+If `--save_light_envmap` is set, the envmap actually used for rendering is exported as `optimized_light_envmap.png`.
+
+- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
+  - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
 
 For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
 - albedo from the model's SH0 color term (instead of fixed gray),
