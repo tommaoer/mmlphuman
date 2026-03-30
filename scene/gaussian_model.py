@@ -766,9 +766,14 @@ class GaussianModel:
     def load_envmap_lighting(self, envmap_path, intensity=1.0, auto_rescale=True, target_avg=0.5, diffuse_mode='direct'):
         import imageio.v3 as iio
 
-        env = iio.imread(envmap_path).astype(np.float32)
-        if env.max() > 1.0:
-            env = env / 255.0
+        env_raw = iio.imread(envmap_path)
+        if np.issubdtype(env_raw.dtype, np.integer):
+            # LDR integer formats (png/jpg/...) are normalized to [0,1].
+            maxv = float(np.iinfo(env_raw.dtype).max)
+            env = env_raw.astype(np.float32) / max(maxv, 1.0)
+        else:
+            # HDR float formats (hdr/exr/...) are already linear radiance; keep absolute scale.
+            env = env_raw.astype(np.float32)
         env = np.clip(env[..., :3], 0.0, None)
         env_input = env.copy()
         applied_rescale = 1.0
