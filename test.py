@@ -217,11 +217,16 @@ def testing(args: Config):
     gaussians.prepare_test()
     background = torch.as_tensor(np.array(args.background)).float().cuda()
     if args.test.envmap_path is not None:
-        relight_cfg = gaussians.load_envmap_lighting(args.test.envmap_path, args.test.envmap_intensity)
+        relight_cfg = gaussians.load_envmap_lighting(
+            args.test.envmap_path,
+            args.test.envmap_intensity,
+            auto_rescale=(not getattr(args.test, 'disable_envmap_auto_rescale', False)),
+            target_avg=getattr(args.test, 'envmap_target_avg', 0.5),
+        )
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
     if getattr(args.test, 'save_light_envmap', False):
-        envmap_path = path.join(args.out_dir, 'optimized_light_envmap.png')
+        envmap_path = path.join(args.out_dir, 'optimized_light_envmap_from_current_sh.png')
         gaussians.export_deferred_envmap(envmap_path)
         print(f'Saved optimized light envmap to: {envmap_path}')
 
@@ -278,6 +283,8 @@ if __name__ == "__main__":
     parser.add_argument('--relight_json', type=str, default=None)
     parser.add_argument('--envmap_path', type=str, default=None)
     parser.add_argument('--envmap_intensity', type=float, default=1.0)
+    parser.add_argument('--disable_envmap_auto_rescale', action='store_true')
+    parser.add_argument('--envmap_target_avg', type=float, default=0.5)
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
@@ -289,6 +296,8 @@ if __name__ == "__main__":
     args.test.relight_json = pargs.relight_json
     args.test.envmap_path = pargs.envmap_path
     args.test.envmap_intensity = pargs.envmap_intensity
+    args.test.disable_envmap_auto_rescale = pargs.disable_envmap_auto_rescale
+    args.test.envmap_target_avg = pargs.envmap_target_avg
     args.test.save_light_envmap = pargs.save_light_envmap
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed

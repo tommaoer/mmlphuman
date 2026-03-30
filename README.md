@@ -145,10 +145,13 @@ python test.py \
   --data_dir {DATASET_DIR} \
   --envmap_path {ENVMAP_FILE} \
   --envmap_intensity 1.0 \
+  --envmap_target_avg 0.5 \
   --save_deferred_buffers
 ```
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
+By default, an auto-rescale step normalizes mean luminance to `envmap_target_avg`; disable it with `--disable_envmap_auto_rescale`.
+If `--save_light_envmap` is set, the current SH lighting is exported as `optimized_light_envmap_from_current_sh.png`.
 
 For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
 - albedo from the model's SH0 color term (instead of fixed gray),

@@ -727,13 +727,21 @@ class GaussianModel:
         return data
 
     @torch.no_grad()
-    def load_envmap_lighting(self, envmap_path, intensity=1.0):
+    def load_envmap_lighting(self, envmap_path, intensity=1.0, auto_rescale=True, target_avg=0.5):
         import imageio.v3 as iio
 
         env = iio.imread(envmap_path).astype(np.float32)
         if env.max() > 1.0:
             env = env / 255.0
-        env = np.clip(env[..., :3], 0.0, None) * float(intensity)
+        env = np.clip(env[..., :3], 0.0, None)
+        applied_rescale = 1.0
+        if auto_rescale:
+            lum = 0.2126 * env[..., 0] + 0.7152 * env[..., 1] + 0.0722 * env[..., 2]
+            lum_mean = float(lum.mean())
+            if lum_mean > 1e-6:
+                applied_rescale = float(target_avg) / lum_mean
+                env = env * applied_rescale
+        env = env * float(intensity)
         H, W = env.shape[:2]
 
         theta = (np.arange(H, dtype=np.float32) + 0.5) / H * np.pi
@@ -756,7 +764,15 @@ class GaussianModel:
         self._ensure_deferred_params()
         self.use_deferredgs = True
         self.set_deferred_lighting(light_sh=coeff, light_dc=np.zeros(3, dtype=np.float32))
-        return dict(light_sh=coeff.tolist(), light_dc=[0.0, 0.0, 0.0], envmap_path=envmap_path, intensity=float(intensity))
+        return dict(
+            light_sh=coeff.tolist(),
+            light_dc=[0.0, 0.0, 0.0],
+            envmap_path=envmap_path,
+            intensity=float(intensity),
+            auto_rescale=bool(auto_rescale),
+            rescale_factor=float(applied_rescale),
+            target_avg=float(target_avg),
+        )
 
     @torch.no_grad()
     def export_deferred_envmap(self, output_path, height=256, width=512):

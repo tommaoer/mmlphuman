@@ -103,13 +103,19 @@ def training(args: Config):
         deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
         deferred_depth_normal_loss = torch.tensor(0.0, device=image.device)
         if getattr(args, 'use_deferredgs', False):
-            deferred_normal_loss = normal_unit_loss(info['normal']) * getattr(args, 'lambda_deferred_normal', 0.0)
-            deferred_albedo_loss = l1_loss(info['albedo'], image_gt) * getattr(args, 'lambda_deferred_albedo', 0.01)
-            deferred_normal_tv_loss = image_tv_loss(info['normal'], mask=alpha) * getattr(args, 'lambda_deferred_normal_tv', 0.005)
-            deferred_rgb_tv_loss = image_tv_loss(image, mask=alpha) * getattr(args, 'lambda_deferred_rgb_tv', 0.002)
+            lambda_deferred_normal = getattr(args, 'lambda_deferred_normal', getattr(args, 'lambda_normal_smooth', 0.0))
+            lambda_deferred_albedo = getattr(args, 'lambda_deferred_albedo', getattr(args, 'lambda_albedo_rgb', 0.01))
+            lambda_deferred_normal_tv = getattr(args, 'lambda_deferred_normal_tv', getattr(args, 'lambda_normal_tv', 0.001))
+            lambda_deferred_rgb_tv = getattr(args, 'lambda_deferred_rgb_tv', getattr(args, 'lambda_rgb_tv', 0.0005))
+            lambda_deferred_depth_normal = getattr(args, 'lambda_deferred_depth_normal', getattr(args, 'lambda_depth_normal', getattr(args, 'lambda_normal_consistency', 0.01)))
+
+            deferred_normal_loss = normal_unit_loss(info['normal']) * lambda_deferred_normal
+            deferred_albedo_loss = l1_loss(info['albedo'], image_gt) * lambda_deferred_albedo
+            deferred_normal_tv_loss = image_tv_loss(info['normal'], mask=alpha) * lambda_deferred_normal_tv
+            deferred_rgb_tv_loss = image_tv_loss(image, mask=alpha) * lambda_deferred_rgb_tv
             if 'depth' in info:
                 normal_from_depth = depth_to_normal(info['depth'].squeeze(-1), cam['K'])
-                deferred_depth_normal_loss = normal_cosine_loss(normal_from_depth, info['normal'], mask=alpha) * getattr(args, 'lambda_deferred_depth_normal', 0.01)
+                deferred_depth_normal_loss = normal_cosine_loss(normal_from_depth, info['normal'], mask=alpha) * lambda_deferred_depth_normal
 
         loss = (
             l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss
