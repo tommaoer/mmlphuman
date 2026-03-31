@@ -727,7 +727,7 @@ class GaussianModel:
         return data
 
     @torch.no_grad()
-    def load_envmap_lighting(self, envmap_path, intensity=1.0):
+    def load_envmap_lighting(self, envmap_path, intensity=1.0, auto_normalize=True, target_avg=0.5):
         import imageio.v3 as iio
 
         env = np.asarray(iio.imread(envmap_path))
@@ -737,7 +737,15 @@ class GaussianModel:
         else:
             env = env.astype(np.float32)
         env = np.nan_to_num(env, nan=0.0, posinf=0.0, neginf=0.0)
-        env = np.clip(env[..., :3], 0.0, None) * float(intensity)
+        env = np.clip(env[..., :3], 0.0, None)
+
+        avg_before = float(env.mean())
+        normalize_scale = 1.0
+        if auto_normalize and target_avg > 0:
+            normalize_scale = float(target_avg) / max(avg_before, 1e-6)
+            env = env * normalize_scale
+        env = env * float(intensity)
+        avg_after = float(env.mean())
         H, W = env.shape[:2]
 
         theta = (np.arange(H, dtype=np.float32) + 0.5) / H * np.pi
@@ -760,7 +768,17 @@ class GaussianModel:
         self._ensure_deferred_params()
         self.use_deferredgs = True
         self.set_deferred_lighting(light_sh=coeff, light_dc=np.zeros(3, dtype=np.float32))
-        return dict(light_sh=coeff.tolist(), light_dc=[0.0, 0.0, 0.0], envmap_path=envmap_path, intensity=float(intensity))
+        return dict(
+            light_sh=coeff.tolist(),
+            light_dc=[0.0, 0.0, 0.0],
+            envmap_path=envmap_path,
+            intensity=float(intensity),
+            auto_normalize=bool(auto_normalize),
+            target_avg=float(target_avg),
+            normalize_scale=float(normalize_scale),
+            avg_before=float(avg_before),
+            avg_after=float(avg_after),
+        )
 
     @torch.no_grad()
     def export_deferred_envmap(self, output_path, height=256, width=512):

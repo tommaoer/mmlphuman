@@ -145,10 +145,16 @@ python test.py \
   --data_dir {DATASET_DIR} \
   --envmap_path {ENVMAP_FILE} \
   --envmap_intensity 1.0 \
+  --envmap_auto_normalize \
+  --envmap_target_avg 0.5 \
   --save_deferred_buffers
 ```
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
+
+- `--envmap_auto_normalize` (default enabled): normalize envmap average luminance to `--envmap_target_avg` before applying intensity.
+- `--no_envmap_auto_normalize`: disable the normalization for raw HDR intensity comparison.
+- `--envmap_intensity`: final multiplicative scale after optional normalization.
 
 For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
 - albedo from the model's SH0 color term (instead of fixed gray),
