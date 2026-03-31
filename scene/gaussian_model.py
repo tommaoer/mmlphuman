@@ -103,6 +103,7 @@ class GaussianModel:
         self.use_geom_normal_for_lighting = False
         self.flip_normal_towards_camera = False
         self.convert_lighting_normal_to_world = False
+        self.direct_envmap_single_sample = False
 
         # lbs weights
         self._weights = None
@@ -753,7 +754,10 @@ class GaussianModel:
             normal_lit = normal_lit * facing
 
         if self.use_direct_envmap and self.deferred_envmap is not None:
-            diffuse_light = self._sample_envmap_diffuse(normal_lit)
+            if self.direct_envmap_single_sample:
+                diffuse_light = self._sample_envmap_dirs(normal_lit)
+            else:
+                diffuse_light = self._sample_envmap_diffuse(normal_lit)
             if self.match_direct_envmap_energy:
                 sh_basis = self._eval_sh9(normal_lit)
                 diffuse_light_sh = torch.einsum('hwc,ck->hwk', sh_basis, self.deferred_light_sh) + self.deferred_light_dc

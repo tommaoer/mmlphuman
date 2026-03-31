@@ -170,7 +170,7 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
   - Note: if you accidentally set `--envmap_norm_min_scale` twice (and forget `--envmap_norm_max_scale`), the second value overwrites min and can force over-bright results.
 - `--use_gt_envmap`: use the loaded envmap directly for test-time relighting instead of SH approximation.
 - `--use_envmap_direct`: use a higher-frequency envmap diffuse approximation (multi-direction envmap sampling) at test time.
-- `--pure_gt_envmap`: force pure GT-envmap relighting path (`use_gt_envmap` + direct sampling + disable SH energy matching).
+- `--pure_gt_envmap`: force pure GT-envmap relighting path (`use_gt_envmap` + single-sample direct lookup + disable SH energy matching).
 - `--match_direct_envmap_energy` (default on): rescale direct-envmap diffuse energy to match SH branch brightness and avoid overly dark results.
 - `--no_match_direct_envmap_energy`: disable this brightness matching.
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
@@ -186,6 +186,7 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
 - `--flip_normal_towards_camera`: flip lighting normals to face camera (useful when back-facing normals cause dark back side).
 - `--convert_lighting_normal_to_world` (default on): convert lighting normals from camera space to world space before envmap/SH lookup.
 - `--no_convert_lighting_normal_to_world`: disable this conversion.
+- `--direct_envmap_single_sample`: use direct single-direction envmap lookup (no multi-sample diffuse approximation).
 
 You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--envmap_path`.
 
