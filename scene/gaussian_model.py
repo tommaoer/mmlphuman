@@ -881,13 +881,16 @@ class GaussianModel:
         return env
 
     @torch.no_grad()
-    def export_loaded_envmap(self, output_path):
+    def export_loaded_envmap(self, output_path, raw_output_path=None):
         if self.deferred_envmap is None:
             return None
         env = self.deferred_envmap.detach().cpu().numpy()
-        env = np.clip(env, 0.0, 1.0)
+        env = np.clip(env, 0.0, None)
+        if raw_output_path is not None:
+            np.save(raw_output_path, env.astype(np.float32))
+        env_vis = env / (1.0 + env)
         import imageio.v3 as iio
-        iio.imwrite(output_path, (env * 255.0).astype(np.uint8))
+        iio.imwrite(output_path, np.clip(env_vis * 255.0, 0, 255).astype(np.uint8))
         return env
 
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
