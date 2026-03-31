@@ -100,6 +100,8 @@ class GaussianModel:
         self.use_direct_envmap = False
         self.deferred_envmap = None
         self.match_direct_envmap_energy = True
+        self.use_geom_normal_for_lighting = False
+        self.flip_normal_towards_camera = False
 
         # lbs weights
         self._weights = None
@@ -735,22 +737,30 @@ class GaussianModel:
         roughness = torch.clamp(roughness / denom, 0.0, 1.0)
         specular = torch.clamp(specular / denom, 0.0, 1.0)
 
+        cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
+        view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
+
+        normal_lit = normal_geom if self.use_geom_normal_for_lighting else normal
+        normal_lit = F.normalize(normal_lit, dim=-1)
+        if self.flip_normal_towards_camera:
+            facing = torch.sign((normal_lit * view_dir).sum(dim=-1, keepdim=True))
+            facing = torch.where(facing == 0, torch.ones_like(facing), facing)
+            normal_lit = normal_lit * facing
+
         if self.use_direct_envmap and self.deferred_envmap is not None:
-            diffuse_light = self._sample_envmap_diffuse(normal)
+            diffuse_light = self._sample_envmap_diffuse(normal_lit)
             if self.match_direct_envmap_energy:
-                sh_basis = self._eval_sh9(normal)
+                sh_basis = self._eval_sh9(normal_lit)
                 diffuse_light_sh = torch.einsum('hwc,ck->hwk', sh_basis, self.deferred_light_sh) + self.deferred_light_dc
                 mean_direct = diffuse_light.mean(dim=(0, 1), keepdim=True).clamp_min(1e-4)
                 mean_sh = diffuse_light_sh.mean(dim=(0, 1), keepdim=True).clamp_min(1e-4)
                 gain = torch.clamp(mean_sh / mean_direct, 0.25, 4.0)
                 diffuse_light = diffuse_light * gain
         else:
-            sh_basis = self._eval_sh9(normal)
+            sh_basis = self._eval_sh9(normal_lit)
             diffuse_light = torch.einsum('hwc,ck->hwk', sh_basis, self.deferred_light_sh) + self.deferred_light_dc
         diffuse_light = torch.clamp_min(diffuse_light, 0.0)
 
-        cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
-        view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
         half_vec = F.normalize(view_dir + torch.tensor([0.0, 0.0, 1.0], device=view_dir.device), dim=-1)
         spec_pow = 4.0 + (1.0 - roughness) * 60.0
         spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow

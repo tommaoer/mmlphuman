@@ -236,6 +236,8 @@ def testing(args: Config):
     gaussians.is_test = args.test.is_test
     gaussians.prepare_test()
     gaussians.match_direct_envmap_energy = getattr(args.test, 'match_direct_envmap_energy', True)
+    gaussians.use_geom_normal_for_lighting = getattr(args.test, 'use_geom_normal_for_lighting', False)
+    gaussians.flip_normal_towards_camera = getattr(args.test, 'flip_normal_towards_camera', False)
     background = torch.as_tensor(np.array(args.background)).float().cuda()
     if args.test.envmap_path is not None:
         relight_cfg = gaussians.load_envmap_lighting(
@@ -330,6 +332,8 @@ if __name__ == "__main__":
     parser.add_argument('--no_match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_false')
     parser.add_argument('--output_srgb', dest='output_srgb', action='store_true')
     parser.add_argument('--output_linear', dest='output_srgb', action='store_false')
+    parser.add_argument('--use_geom_normal_for_lighting', action='store_true')
+    parser.add_argument('--flip_normal_towards_camera', action='store_true')
     parser.set_defaults(envmap_auto_normalize=True)
     parser.set_defaults(match_direct_envmap_energy=True)
     parser.set_defaults(output_srgb=True)
@@ -352,6 +356,8 @@ if __name__ == "__main__":
     args.test.match_direct_envmap_energy = pargs.match_direct_envmap_energy
     args.test.envmap_debug_print = pargs.envmap_debug_print
     args.test.output_srgb = pargs.output_srgb
+    args.test.use_geom_normal_for_lighting = pargs.use_geom_normal_for_lighting
+    args.test.flip_normal_towards_camera = pargs.flip_normal_towards_camera
     if pargs.pure_gt_envmap:
         args.test.use_gt_envmap = True
         args.test.use_envmap_direct = True
