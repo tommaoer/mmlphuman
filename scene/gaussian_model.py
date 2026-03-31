@@ -792,17 +792,26 @@ class GaussianModel:
         norm_min_scale=0.25,
         norm_max_scale=4.0,
         use_direct_envmap=False,
+        debug_print=False,
     ):
         import imageio.v3 as iio
 
         env = np.asarray(iio.imread(envmap_path))
+        if debug_print:
+            print(f'[envmap] loaded: shape={env.shape}, dtype={env.dtype}, min={np.min(env):.6f}, max={np.max(env):.6f}, mean={np.mean(env):.6f}')
         if np.issubdtype(env.dtype, np.integer):
             dtype_max = float(np.iinfo(env.dtype).max)
             env = env.astype(np.float32) / max(dtype_max, 1.0)
+            if debug_print:
+                print(f'[envmap] integer normalize /{dtype_max}: min={env.min():.6f}, max={env.max():.6f}, mean={env.mean():.6f}')
         else:
             env = env.astype(np.float32)
+            if debug_print:
+                print(f'[envmap] cast float32: min={env.min():.6f}, max={env.max():.6f}, mean={env.mean():.6f}')
         env = np.nan_to_num(env, nan=0.0, posinf=0.0, neginf=0.0)
         env = np.clip(env[..., :3], 0.0, None)
+        if debug_print:
+            print(f'[envmap] sanitize+rgb+clip>=0: min={env.min():.6f}, max={env.max():.6f}, mean={env.mean():.6f}')
 
         if norm_min_scale > norm_max_scale:
             norm_min_scale, norm_max_scale = norm_max_scale, norm_min_scale
@@ -815,9 +824,13 @@ class GaussianModel:
             normalize_scale_unclamped = float(target_avg) / max(avg_before, 1e-6)
             normalize_scale = float(np.clip(normalize_scale_unclamped, norm_min_scale, norm_max_scale))
             env = env * normalize_scale
+        if debug_print:
+            print(f'[envmap] luma before={avg_before:.6f}, scale_unclamped={normalize_scale_unclamped:.6f}, scale_used={normalize_scale:.6f}')
         env = env * float(intensity)
         luma_after = env[..., 0] * 0.2126 + env[..., 1] * 0.7152 + env[..., 2] * 0.0722
         avg_after = float(luma_after.mean())
+        if debug_print:
+            print(f'[envmap] after intensity={float(intensity):.6f}: luma_after={avg_after:.6f}, min={env.min():.6f}, max={env.max():.6f}, mean={env.mean():.6f}')
         H, W = env.shape[:2]
 
         theta = (np.arange(H, dtype=np.float32) + 0.5) / H * np.pi
@@ -836,6 +849,8 @@ class GaussianModel:
         lhs = bw.T @ basis + np.eye(9, dtype=np.float32) * 1e-6
         rhs = bw.T @ rgb
         coeff = np.linalg.solve(lhs, rhs).astype(np.float32)
+        if debug_print:
+            print(f'[envmap] sh coeff stats: min={coeff.min():.6f}, max={coeff.max():.6f}, mean={coeff.mean():.6f}')
 
         self._ensure_deferred_params()
         self.use_deferredgs = True
@@ -857,6 +872,7 @@ class GaussianModel:
             avg_before=float(avg_before),
             avg_after=float(avg_after),
             use_direct_envmap=bool(use_direct_envmap),
+            debug_print=bool(debug_print),
         )
 
     @torch.no_grad()

@@ -102,6 +102,7 @@ python train.py \
 
 - `--no_train_envmap_auto_normalize` can be used for raw HDR initialization without average-brightness normalization.
 - `--train_envmap_norm_min_scale` / `--train_envmap_norm_max_scale` clamp the normalization gain to avoid overly dark/bright initialization.
+- `--train_envmap_debug_print` prints per-step envmap loading/normalization statistics.
 
 ### Canonical-space deferredGS training
 
@@ -176,6 +177,7 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
 - `--save_light_envmap`: exports `optimized_light_envmap_sh.png` (always SH-projected). If `--use_gt_envmap`/`--use_envmap_direct` is on, it also exports:
   - `input_envmap_used_preview.png` (tone-mapped preview for visualization),
   - `input_envmap_used_raw.npy` (raw HDR float values actually used for direct relighting).
+- `--envmap_debug_print`: prints per-step envmap loading/normalization statistics in `load_envmap_lighting`.
 
 You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--envmap_path`.
 

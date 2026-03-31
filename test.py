@@ -226,6 +226,7 @@ def testing(args: Config):
             getattr(args.test, 'envmap_norm_min_scale', 0.25),
             getattr(args.test, 'envmap_norm_max_scale', 4.0),
             bool(getattr(args.test, 'use_envmap_direct', False) or getattr(args.test, 'use_gt_envmap', False)),
+            getattr(args.test, 'envmap_debug_print', False),
         )
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
@@ -292,6 +293,7 @@ if __name__ == "__main__":
     parser.add_argument('--use_envmap_direct', action='store_true')
     parser.add_argument('--use_gt_envmap', action='store_true')
     parser.add_argument('--pure_gt_envmap', action='store_true')
+    parser.add_argument('--envmap_debug_print', action='store_true')
     parser.add_argument('--match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_true')
     parser.add_argument('--no_match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_false')
     parser.set_defaults(envmap_auto_normalize=True)
@@ -313,6 +315,7 @@ if __name__ == "__main__":
     args.test.use_envmap_direct = pargs.use_envmap_direct
     args.test.use_gt_envmap = pargs.use_gt_envmap
     args.test.match_direct_envmap_energy = pargs.match_direct_envmap_energy
+    args.test.envmap_debug_print = pargs.envmap_debug_print
     if pargs.pure_gt_envmap:
         args.test.use_gt_envmap = True
         args.test.use_envmap_direct = True
