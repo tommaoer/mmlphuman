@@ -139,6 +139,7 @@ python test.py \
   --envmap_norm_min_scale 0.25 \
   --envmap_norm_max_scale 4.0 \
   --pure_gt_envmap \
+  --output_srgb \
   --save_deferred_buffers
 ```
 
@@ -178,6 +179,8 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
   - `input_envmap_used_preview.png` (tone-mapped preview for visualization),
   - `input_envmap_used_raw.npy` (raw HDR float values actually used for direct relighting).
 - `--envmap_debug_print`: prints per-step envmap loading/normalization statistics in `load_envmap_lighting`.
+- `--output_srgb` (default on): convert linear render outputs to sRGB before saving PNGs for visualization.
+- `--output_linear`: save linear outputs directly (no sRGB conversion).
 
 You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--envmap_path`.
 

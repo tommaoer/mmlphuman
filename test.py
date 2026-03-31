@@ -23,6 +23,19 @@ from utils.config_utils import Config
 from utils.image_utils import encode_bytes
 from utils.smpl_utils import init_smpl_pose
 
+def _rgb_to_srgb(f: torch.Tensor) -> torch.Tensor:
+    return torch.where(
+        f <= 0.0031308,
+        f * 12.92,
+        torch.pow(torch.clamp(f, min=0.0031308), 1.0 / 2.4) * 1.055 - 0.055,
+    )
+
+def _to_png_uint8(image: torch.Tensor, output_srgb: bool = True):
+    image = torch.clamp(image, min=0.0, max=1.0)
+    if output_srgb:
+        image = _rgb_to_srgb(image)
+    return (torch.clamp(image, min=0.0, max=1.0) * 255).byte().contiguous().cpu().numpy()
+
 def render_frame(gaussians: GaussianModel, cam, background):
     if getattr(gaussians, 'use_deferredgs', False):
         return gaussians.render_deferred(cam, background=background)
@@ -154,7 +167,7 @@ def testing_novel_cam_pose_speed(gaussians: GaussianModel, out_dir, frame_ids, p
     print('Running time:', run_time)
     print('FPS:', fps)
 
-def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_list, cam, background, save_buffers=False):
+def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_list, cam, background, save_buffers=False, output_srgb=True):
 
     os.makedirs(path.join(out_dir), exist_ok=True)
     for frame_id in tqdm(frame_ids):
@@ -166,13 +179,13 @@ def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_li
         gaussians.Rh = torch.as_tensor(pose['Rh']).cpu()
         image, alpha, info = render_frame(gaussians, cam, background)
 
-        image = (torch.clamp(image, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
+        image = _to_png_uint8(image, output_srgb=output_srgb)
         iio.imwrite(path.join(out_dir, f'{frame_id:08d}.png'), image)
         if save_buffers and getattr(gaussians, 'use_deferredgs', False):
             save_deferred_buffers(info, out_dir, frame_id)
 
 
-def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save_buffers=False):
+def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save_buffers=False, output_srgb=True):
     test_dataloader = DataLoader(
         dataset=dataset,
         batch_size=1,
@@ -192,11 +205,11 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save
 
         image, alpha, info = render_frame(gaussians, cam, background)
 
-        image = (torch.clamp(image, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
+        image = _to_png_uint8(image, output_srgb=output_srgb)
 
         image_gt = cam['image']
         image_gt[~cam['mask']] = background
-        image_gt = (image_gt * 255).byte().contiguous().cpu().numpy()
+        image_gt = _to_png_uint8(image_gt, output_srgb=output_srgb)
         mask = cam['mask'].byte().contiguous().cpu().numpy() * 255
 
         iio.imwrite(path.join(out_dir, f'gt/{frame_id:08d}.png'), image_gt)
@@ -260,7 +273,11 @@ def testing(args: Config):
         if args.test.test_speed:
             testing_novel_cam_pose_speed(gaussians, args.out_dir, test_frame_ids, pose_list, cam, background)
         else:
-            testing_novel_cam_pose(gaussians, args.out_dir, test_frame_ids, pose_list, cam, background, save_buffers=args.test.save_deferred_buffers)
+            testing_novel_cam_pose(
+                gaussians, args.out_dir, test_frame_ids, pose_list, cam, background,
+                save_buffers=args.test.save_deferred_buffers,
+                output_srgb=getattr(args.test, 'output_srgb', True),
+            )
     else:
         DatasetType = get_dataset_type(args.data_dir)
         testset = DatasetType(
@@ -271,7 +288,11 @@ def testing(args: Config):
             image_scaling=args.image_scaling,
         )
 
-        testing_dataset(gaussians, args.out_dir, testset, background, save_buffers=args.test.save_deferred_buffers)
+        testing_dataset(
+            gaussians, args.out_dir, testset, background,
+            save_buffers=args.test.save_deferred_buffers,
+            output_srgb=getattr(args.test, 'output_srgb', True),
+        )
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Testing")
@@ -296,8 +317,11 @@ if __name__ == "__main__":
     parser.add_argument('--envmap_debug_print', action='store_true')
     parser.add_argument('--match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_true')
     parser.add_argument('--no_match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_false')
+    parser.add_argument('--output_srgb', dest='output_srgb', action='store_true')
+    parser.add_argument('--output_linear', dest='output_srgb', action='store_false')
     parser.set_defaults(envmap_auto_normalize=True)
     parser.set_defaults(match_direct_envmap_energy=True)
+    parser.set_defaults(output_srgb=True)
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
@@ -316,6 +340,7 @@ if __name__ == "__main__":
     args.test.use_gt_envmap = pargs.use_gt_envmap
     args.test.match_direct_envmap_energy = pargs.match_direct_envmap_energy
     args.test.envmap_debug_print = pargs.envmap_debug_print
+    args.test.output_srgb = pargs.output_srgb
     if pargs.pure_gt_envmap:
         args.test.use_gt_envmap = True
         args.test.use_envmap_direct = True
