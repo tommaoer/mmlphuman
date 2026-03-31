@@ -137,7 +137,7 @@ python test.py \
   --envmap_target_avg 0.5 \
   --envmap_norm_min_scale 0.25 \
   --envmap_norm_max_scale 4.0 \
-  --use_envmap_direct \
+  --use_gt_envmap \
   --save_deferred_buffers
 ```
 
@@ -159,13 +159,14 @@ python test.py \
 ```
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
-By default, rendering uses this SH-projected lighting; use `--use_envmap_direct` if you want to use the original envmap texture directly at test time.
+By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or legacy `--use_envmap_direct`) to use the original envmap texture at test time.
 
 - `--envmap_auto_normalize` (default enabled): normalize envmap average luminance to `--envmap_target_avg` before applying intensity.
 - `--no_envmap_auto_normalize`: disable the normalization for raw HDR intensity comparison.
 - `--envmap_intensity`: final multiplicative scale after optional normalization.
 - `--envmap_norm_min_scale` / `--envmap_norm_max_scale`: clamp auto-normalization gain to avoid severe over/under exposure.
   - Note: if you accidentally set `--envmap_norm_min_scale` twice (and forget `--envmap_norm_max_scale`), the second value overwrites min and can force over-bright results.
+- `--use_gt_envmap`: use the loaded envmap directly for test-time relighting instead of SH approximation.
 - `--use_envmap_direct`: use a higher-frequency envmap diffuse approximation (multi-direction envmap sampling) at test time.
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
   - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
