@@ -197,6 +197,7 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save
     for k in ['gt', 'result', 'mask']:
         os.makedirs(path.join(out_dir, k), exist_ok=True)
 
+    written = 0
     for cam in tqdm(test_dataloader):
         cam = data_to_cam(cam, non_blocking=False)
         frame_id = cam['frame_id']
@@ -215,8 +216,14 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save
         iio.imwrite(path.join(out_dir, f'gt/{frame_id:08d}.png'), image_gt)
         iio.imwrite(path.join(out_dir, f'result/{frame_id:08d}.png'), image)
         iio.imwrite(path.join(out_dir, f'mask/{frame_id:08d}.png'), mask)
+        written += 1
         if save_buffers and getattr(gaussians, 'use_deferredgs', False):
             save_deferred_buffers(info, out_dir, frame_id)
+    if written == 0:
+        raise RuntimeError(
+            'No frames were rendered. Please check test frame range/camera IDs in config '
+            '(test.begin_ith_frame, test.num_frame, test.frame_interval, test.cam_ids) and dataset coverage.'
+        )
 
 
 @torch.no_grad()
@@ -286,6 +293,10 @@ def testing(args: Config):
             cam_ids=test_cam_ids,
             background=np.array(args.background),
             image_scaling=args.image_scaling,
+        )
+        print(
+            f'Test selection: frames[{test_frame_ids[0]}..{test_frame_ids[-1]}], '
+            f'num_frames={len(test_frame_ids)}, cam_ids={test_cam_ids}, matched_samples={len(testset)}'
         )
 
         testing_dataset(
