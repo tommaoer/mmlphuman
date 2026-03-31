@@ -176,8 +176,9 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
   - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
 - `--save_light_envmap`: exports `optimized_light_envmap_sh.png` (always SH-projected). If `--use_gt_envmap`/`--use_envmap_direct` is on, it also exports:
-  - `input_envmap_used_preview.png` (tone-mapped preview for visualization),
+  - `input_envmap_used_preview.png` (tone-mapped + sRGB preview for visualization),
   - `input_envmap_used_raw.npy` (raw HDR float values actually used for direct relighting).
+  - Note: exported PNG envmaps are saved in sRGB for display; raw HDR values stay in `.npy`.
 - `--envmap_debug_print`: prints per-step envmap loading/normalization statistics in `load_envmap_lighting`.
 - `--output_srgb` (default on): convert linear render outputs to sRGB before saving PNGs for visualization.
 - `--output_linear`: save linear outputs directly (no sRGB conversion).

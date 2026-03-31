@@ -20,6 +20,15 @@ from utils.sh_utils import RGB2SH, SH2RGB
 
 class GaussianModel:
     @staticmethod
+    def _linear_to_srgb_np(x: np.ndarray) -> np.ndarray:
+        x = np.clip(x, 0.0, None)
+        return np.where(
+            x <= 0.0031308,
+            x * 12.92,
+            1.055 * np.power(np.clip(x, 0.0031308, None), 1.0 / 2.4) - 0.055,
+        )
+
+    @staticmethod
     def _estimate_point_normals_from_xyz(xyz, k=16):
         with torch.no_grad():
             _, idxs, _ = knn_points(xyz[None], xyz[None], K=k+1)
@@ -891,9 +900,10 @@ class GaussianModel:
         light_dc = self.deferred_light_dc.detach().cpu().numpy()
         env = np.einsum('hwc,ck->hwk', basis, light_sh) + light_dc[None, None]
         env = np.clip(env, 0.0, None)
+        env_vis = GaussianModel._linear_to_srgb_np(env)
 
         import imageio.v3 as iio
-        iio.imwrite(output_path, np.clip(env * 255.0, 0, 255).astype(np.uint8))
+        iio.imwrite(output_path, np.clip(env_vis * 255.0, 0, 255).astype(np.uint8))
         return env
 
     @torch.no_grad()
@@ -905,6 +915,7 @@ class GaussianModel:
         if raw_output_path is not None:
             np.save(raw_output_path, env.astype(np.float32))
         env_vis = env / (1.0 + env)
+        env_vis = GaussianModel._linear_to_srgb_np(env_vis)
         import imageio.v3 as iio
         iio.imwrite(output_path, np.clip(env_vis * 255.0, 0, 255).astype(np.uint8))
         return env
