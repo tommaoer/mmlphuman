@@ -397,7 +397,8 @@ if __name__ == "__main__":
         args.test.use_gt_envmap = True
         args.test.use_envmap_direct = True
         args.test.match_direct_envmap_energy = False
-        args.test.direct_envmap_single_sample = True
+        args.test.direct_envmap_single_sample = False
+        args.test.use_geom_normal_for_lighting = True
         args.test.relight_specular_scale = 0.0
         if args.test.relight_override_roughness is None:
             args.test.relight_override_roughness = 1.0
