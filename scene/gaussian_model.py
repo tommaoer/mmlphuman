@@ -747,6 +747,9 @@ class GaussianModel:
         env = np.nan_to_num(env, nan=0.0, posinf=0.0, neginf=0.0)
         env = np.clip(env[..., :3], 0.0, None)
 
+        if norm_min_scale > norm_max_scale:
+            norm_min_scale, norm_max_scale = norm_max_scale, norm_min_scale
+
         luma = env[..., 0] * 0.2126 + env[..., 1] * 0.7152 + env[..., 2] * 0.0722
         avg_before = float(luma.mean())
         normalize_scale = 1.0

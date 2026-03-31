@@ -273,6 +273,11 @@ if __name__ == "__main__":
     args.train_envmap_target_avg = pargs.train_envmap_target_avg
     args.train_envmap_norm_min_scale = pargs.train_envmap_norm_min_scale
     args.train_envmap_norm_max_scale = pargs.train_envmap_norm_max_scale
+    if args.train_envmap_norm_min_scale > args.train_envmap_norm_max_scale:
+        raise ValueError(
+            f'Invalid train envmap normalization range: min({args.train_envmap_norm_min_scale}) > max({args.train_envmap_norm_max_scale}). '
+            'Did you mean to set --train_envmap_norm_max_scale?'
+        )
     os.makedirs(args.out_dir, exist_ok = True)
 
     OmegaConf.save(args, path.join(args.out_dir, 'config.yaml'))

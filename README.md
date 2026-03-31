@@ -176,6 +176,7 @@ The script projects the environment map to 2nd-order SH (9 coefficients) and use
 - `--no_envmap_auto_normalize`: disable the normalization for raw HDR intensity comparison.
 - `--envmap_intensity`: final multiplicative scale after optional normalization.
 - `--envmap_norm_min_scale` / `--envmap_norm_max_scale`: clamp auto-normalization gain to avoid severe over/under exposure.
+  - Note: if you accidentally set `--envmap_norm_min_scale` twice (and forget `--envmap_norm_max_scale`), the second value overwrites min and can force over-bright results.
 
 For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
 - albedo from the model's SH0 color term (instead of fixed gray),

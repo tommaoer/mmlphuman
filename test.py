@@ -306,6 +306,11 @@ if __name__ == "__main__":
     args.test.envmap_target_avg = pargs.envmap_target_avg
     args.test.envmap_norm_min_scale = pargs.envmap_norm_min_scale
     args.test.envmap_norm_max_scale = pargs.envmap_norm_max_scale
+    if args.test.envmap_norm_min_scale > args.test.envmap_norm_max_scale:
+        raise ValueError(
+            f'Invalid envmap normalization range: min({args.test.envmap_norm_min_scale}) > max({args.test.envmap_norm_max_scale}). '
+            'Did you mean to set --envmap_norm_max_scale?'
+        )
     args.test.save_light_envmap = pargs.save_light_envmap
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed
