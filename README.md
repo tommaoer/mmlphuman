@@ -171,6 +171,7 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
 - `--use_gt_envmap`: use the loaded envmap directly for test-time relighting instead of SH approximation.
 - `--use_envmap_direct`: use a higher-frequency envmap diffuse approximation (multi-direction envmap sampling) at test time.
 - `--pure_gt_envmap`: force pure GT-envmap relighting path (`use_gt_envmap` + single-sample direct lookup + disable SH energy matching).
+- `--relight_specular_scale`: scale specular term during relighting (default `1.0`, set `0.0` to remove metallic-like highlights).
 - `--match_direct_envmap_energy` (default on): rescale direct-envmap diffuse energy to match SH branch brightness and avoid overly dark results.
 - `--no_match_direct_envmap_energy`: disable this brightness matching.
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
@@ -179,6 +180,7 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
   - `input_envmap_used_preview.png` (direct linear-to-sRGB preview for visualization),
   - `input_envmap_used_raw.npy` (raw HDR float values actually used for direct relighting).
   - Note: exported PNG envmaps are saved in sRGB for display; raw HDR values stay in `.npy`.
+  - For non-HDR integer inputs (`.png/.jpg`), preview export keeps original (non-sRGB-converted) display values.
 - `--envmap_debug_print`: prints per-step envmap loading/normalization statistics in `load_envmap_lighting`.
 - `--output_srgb` (default on): convert linear render outputs to sRGB before saving PNGs for visualization.
 - `--output_linear`: save linear outputs directly (no sRGB conversion).

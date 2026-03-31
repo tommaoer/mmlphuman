@@ -104,6 +104,8 @@ class GaussianModel:
         self.flip_normal_towards_camera = False
         self.convert_lighting_normal_to_world = False
         self.direct_envmap_single_sample = False
+        self.relight_specular_scale = 1.0
+        self.loaded_envmap_is_linear = True
 
         # lbs weights
         self._weights = None
@@ -773,7 +775,7 @@ class GaussianModel:
         half_vec = F.normalize(view_dir + torch.tensor([0.0, 0.0, 1.0], device=view_dir.device), dim=-1)
         spec_pow = 4.0 + (1.0 - roughness) * 60.0
         spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
-        shaded = albedo * diffuse_light + specular * spec_term
+        shaded = albedo * diffuse_light + (specular * float(self.relight_specular_scale)) * spec_term
         if background is not None:
             shaded = shaded * alpha + background[None, None] * (1.0 - alpha)
 
@@ -825,9 +827,11 @@ class GaussianModel:
         import imageio.v3 as iio
 
         env = np.asarray(iio.imread(envmap_path))
+        is_integer_input = np.issubdtype(env.dtype, np.integer)
+        self.loaded_envmap_is_linear = not is_integer_input
         if debug_print:
             print(f'[envmap] loaded: shape={env.shape}, dtype={env.dtype}, min={np.min(env):.6f}, max={np.max(env):.6f}, mean={np.mean(env):.6f}')
-        if np.issubdtype(env.dtype, np.integer):
+        if is_integer_input:
             dtype_max = float(np.iinfo(env.dtype).max)
             env = env.astype(np.float32) / max(dtype_max, 1.0)
             if debug_print:
@@ -933,7 +937,10 @@ class GaussianModel:
         env = np.clip(env, 0.0, None)
         if raw_output_path is not None:
             np.save(raw_output_path, env.astype(np.float32))
-        env_vis = GaussianModel._linear_to_srgb_np(env)
+        if self.loaded_envmap_is_linear:
+            env_vis = GaussianModel._linear_to_srgb_np(env)
+        else:
+            env_vis = np.clip(env, 0.0, 1.0)
         import imageio.v3 as iio
         iio.imwrite(output_path, np.clip(env_vis * 255.0, 0, 255).astype(np.uint8))
         return env
