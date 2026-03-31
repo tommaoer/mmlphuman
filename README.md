@@ -174,6 +174,7 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
 - `--relight_specular_scale`: scale specular term during relighting (default `1.0`, set `0.0` to remove metallic-like highlights).
 - `--relight_override_roughness`: force a fixed roughness value during relighting (e.g. `1.0`).
 - `--relight_override_specular`: force a fixed specular value during relighting (e.g. `0.0`).
+- `--lighting_normal_smooth_steps`: smooth lighting normals with N box-filter steps to suppress sparkle/noisy reflective artifacts.
 - `--debug_material_stats`: print roughness/specular min/mean/max from the first rendered frame for inspection.
 - `--match_direct_envmap_energy` (default on): rescale direct-envmap diffuse energy to match SH branch brightness and avoid overly dark results.
 - `--no_match_direct_envmap_energy`: disable this brightness matching.

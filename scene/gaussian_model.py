@@ -108,6 +108,7 @@ class GaussianModel:
         self.loaded_envmap_is_linear = True
         self.relight_override_roughness = None
         self.relight_override_specular = None
+        self.lighting_normal_smooth_steps = 0
 
         # lbs weights
         self._weights = None
@@ -679,6 +680,19 @@ class GaussianModel:
         n = torch.where(alpha > 1e-3, n, torch.zeros_like(n))
         return n
 
+    def _smooth_normal_map(self, normal_map, alpha, steps=1):
+        if steps <= 0:
+            return normal_map
+        n = normal_map.permute(2, 0, 1)[None]
+        a = alpha.permute(2, 0, 1)[None].clamp(0.0, 1.0)
+        for _ in range(int(steps)):
+            n_w = n * a
+            n_blur = F.avg_pool2d(n_w, kernel_size=3, stride=1, padding=1)
+            a_blur = F.avg_pool2d(a, kernel_size=3, stride=1, padding=1).clamp_min(1e-6)
+            n = n_blur / a_blur
+            n = F.normalize(n, dim=1)
+        return n[0].permute(1, 2, 0)
+
     def _sample_envmap_dirs(self, dirs):
         if self.deferred_envmap is None:
             return None
@@ -760,6 +774,8 @@ class GaussianModel:
             facing = torch.sign((normal_lit * view_dir).sum(dim=-1, keepdim=True))
             facing = torch.where(facing == 0, torch.ones_like(facing), facing)
             normal_lit = normal_lit * facing
+        if self.lighting_normal_smooth_steps > 0:
+            normal_lit = self._smooth_normal_map(normal_lit, alpha, self.lighting_normal_smooth_steps)
 
         if self.use_direct_envmap and self.deferred_envmap is not None:
             if self.direct_envmap_single_sample:

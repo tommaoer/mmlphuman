@@ -257,6 +257,7 @@ def testing(args: Config):
     gaussians.relight_specular_scale = getattr(args.test, 'relight_specular_scale', 1.0)
     gaussians.relight_override_roughness = getattr(args.test, 'relight_override_roughness', None)
     gaussians.relight_override_specular = getattr(args.test, 'relight_override_specular', None)
+    gaussians.lighting_normal_smooth_steps = getattr(args.test, 'lighting_normal_smooth_steps', 0)
     background = torch.as_tensor(np.array(args.background)).float().cuda()
     if args.test.envmap_path is not None:
         relight_cfg = gaussians.load_envmap_lighting(
@@ -361,6 +362,7 @@ if __name__ == "__main__":
     parser.add_argument('--relight_specular_scale', type=float, default=1.0)
     parser.add_argument('--relight_override_roughness', type=float, default=None)
     parser.add_argument('--relight_override_specular', type=float, default=None)
+    parser.add_argument('--lighting_normal_smooth_steps', type=int, default=0)
     parser.add_argument('--debug_material_stats', action='store_true')
     parser.set_defaults(envmap_auto_normalize=True)
     parser.set_defaults(match_direct_envmap_energy=True)
@@ -392,6 +394,7 @@ if __name__ == "__main__":
     args.test.relight_specular_scale = pargs.relight_specular_scale
     args.test.relight_override_roughness = pargs.relight_override_roughness
     args.test.relight_override_specular = pargs.relight_override_specular
+    args.test.lighting_normal_smooth_steps = pargs.lighting_normal_smooth_steps
     args.test.debug_material_stats = pargs.debug_material_stats
     if pargs.pure_gt_envmap:
         args.test.use_gt_envmap = True
@@ -404,6 +407,8 @@ if __name__ == "__main__":
             args.test.relight_override_roughness = 1.0
         if args.test.relight_override_specular is None:
             args.test.relight_override_specular = 0.0
+        if args.test.lighting_normal_smooth_steps == 0:
+            args.test.lighting_normal_smooth_steps = 2
     if args.test.envmap_norm_min_scale > args.test.envmap_norm_max_scale:
         raise ValueError(
             f'Invalid envmap normalization range: min({args.test.envmap_norm_min_scale}) > max({args.test.envmap_norm_max_scale}). '
