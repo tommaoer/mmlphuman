@@ -123,7 +123,7 @@ The deferred branch keeps the original training pipeline intact, so setting `use
 
 ### Post-training relighting
 
-If the checkpoint was trained with `use_deferredgs: true`, you can relight it at test time by overriding the learned deferred lighting:
+If the checkpoint was trained with `use_deferredgs: true`, you can relight it at test time by replacing the learned lighting with a new environment map:
 
 ```shell
 python test.py \
@@ -131,27 +131,14 @@ python test.py \
   --model_dir {MODEL_DIR} \
   --out_dir {RELIGHT_OUT_DIR} \
   --data_dir {DATASET_DIR} \
-  --relight_json ./assets/relight_three_point.json \
+  --envmap_path {ENVMAP_FILE} \
+  --envmap_intensity 1.0 \
+  --envmap_auto_normalize \
+  --envmap_target_avg 0.5 \
+  --envmap_norm_min_scale 0.25 \
+  --envmap_norm_max_scale 4.0 \
   --save_deferred_buffers
 ```
-
-The relighting JSON contains:
-
-```json
-{
-  "light_dc": [0.55, 0.52, 0.50],
-  "light_sh": [[... 9 rows total ...]]
-}
-```
-
-- `light_dc`: RGB ambient/base light.
-- `light_sh`: 9 RGB spherical-harmonic coefficients used by the deferred branch.
-- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
-  - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
-
-You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--relight_json`.
-
-#### Relighting with an environment map (new)
 
 You can directly use an equirectangular environment map (`.hdr/.exr/.png/.jpg`) as relighting input:
 
@@ -177,6 +164,10 @@ The script projects the environment map to 2nd-order SH (9 coefficients) and use
 - `--envmap_intensity`: final multiplicative scale after optional normalization.
 - `--envmap_norm_min_scale` / `--envmap_norm_max_scale`: clamp auto-normalization gain to avoid severe over/under exposure.
   - Note: if you accidentally set `--envmap_norm_min_scale` twice (and forget `--envmap_norm_max_scale`), the second value overwrites min and can force over-bright results.
+- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
+  - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
+
+You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--envmap_path`.
 
 For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
 - albedo from the model's SH0 color term (instead of fixed gray),

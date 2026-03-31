@@ -232,14 +232,6 @@ def testing(args: Config):
         gaussians.export_deferred_envmap(envmap_path)
         print(f'Saved optimized light envmap to: {envmap_path}')
 
-    if args.test.relight_json is not None:
-        was_deferredgs = bool(getattr(gaussians, 'use_deferredgs', False))
-        relight_cfg = gaussians.load_deferred_lighting(args.test.relight_json)
-        print(f'Loaded relighting config: {args.test.relight_json}')
-        if not was_deferredgs:
-            print('Warning: checkpoint has no deferredGS flag; initialized deferred params from legacy checkpoint for relighting.')
-        print(json.dumps(relight_cfg, indent=2))
-
     # Dataset
     test_frame_ids = np.arange(args.test.begin_ith_frame, args.test.begin_ith_frame+args.test.frame_interval*args.test.num_frame, args.test.frame_interval).tolist()
     test_cam_ids = np.array(args.test.cam_ids).tolist()
@@ -282,7 +274,6 @@ if __name__ == "__main__":
 
     parser.add_argument('--cam_path', type=str, default=None)
     parser.add_argument('--pose_path', type=str, default=None)
-    parser.add_argument('--relight_json', type=str, default=None)
     parser.add_argument('--envmap_path', type=str, default=None)
     parser.add_argument('--envmap_intensity', type=float, default=1.0)
     parser.add_argument('--envmap_auto_normalize', dest='envmap_auto_normalize', action='store_true')
@@ -299,7 +290,6 @@ if __name__ == "__main__":
 
     args = OmegaConf.load(pargs.config)
     args.data_dir, args.out_dir, args.model_dir, args.test.cam_path, args.test.pose_path = pargs.data_dir, pargs.out_dir, pargs.model_dir, pargs.cam_path, pargs.pose_path
-    args.test.relight_json = pargs.relight_json
     args.test.envmap_path = pargs.envmap_path
     args.test.envmap_intensity = pargs.envmap_intensity
     args.test.envmap_auto_normalize = pargs.envmap_auto_normalize
