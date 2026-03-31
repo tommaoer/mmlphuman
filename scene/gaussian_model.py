@@ -90,6 +90,7 @@ class GaussianModel:
         self.deferred_light_dc = torch.empty(0)
         self.use_direct_envmap = False
         self.deferred_envmap = None
+        self.match_direct_envmap_energy = True
 
         # lbs weights
         self._weights = None
@@ -727,6 +728,13 @@ class GaussianModel:
 
         if self.use_direct_envmap and self.deferred_envmap is not None:
             diffuse_light = self._sample_envmap_diffuse(normal)
+            if self.match_direct_envmap_energy:
+                sh_basis = self._eval_sh9(normal)
+                diffuse_light_sh = torch.einsum('hwc,ck->hwk', sh_basis, self.deferred_light_sh) + self.deferred_light_dc
+                mean_direct = diffuse_light.mean(dim=(0, 1), keepdim=True).clamp_min(1e-4)
+                mean_sh = diffuse_light_sh.mean(dim=(0, 1), keepdim=True).clamp_min(1e-4)
+                gain = torch.clamp(mean_sh / mean_direct, 0.25, 4.0)
+                diffuse_light = diffuse_light * gain
         else:
             sh_basis = self._eval_sh9(normal)
             diffuse_light = torch.einsum('hwc,ck->hwk', sh_basis, self.deferred_light_sh) + self.deferred_light_dc

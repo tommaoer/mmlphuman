@@ -215,6 +215,7 @@ def testing(args: Config):
     gaussians = load_model(args.model_dir)
     gaussians.is_test = args.test.is_test
     gaussians.prepare_test()
+    gaussians.match_direct_envmap_energy = getattr(args.test, 'match_direct_envmap_energy', True)
     background = torch.as_tensor(np.array(args.background)).float().cuda()
     if args.test.envmap_path is not None:
         relight_cfg = gaussians.load_envmap_lighting(
@@ -284,7 +285,10 @@ if __name__ == "__main__":
     parser.add_argument('--envmap_norm_max_scale', type=float, default=4.0)
     parser.add_argument('--use_envmap_direct', action='store_true')
     parser.add_argument('--use_gt_envmap', action='store_true')
+    parser.add_argument('--match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_true')
+    parser.add_argument('--no_match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_false')
     parser.set_defaults(envmap_auto_normalize=True)
+    parser.set_defaults(match_direct_envmap_energy=True)
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
@@ -301,6 +305,7 @@ if __name__ == "__main__":
     args.test.envmap_norm_max_scale = pargs.envmap_norm_max_scale
     args.test.use_envmap_direct = pargs.use_envmap_direct
     args.test.use_gt_envmap = pargs.use_gt_envmap
+    args.test.match_direct_envmap_energy = pargs.match_direct_envmap_energy
     if args.test.envmap_norm_min_scale > args.test.envmap_norm_max_scale:
         raise ValueError(
             f'Invalid envmap normalization range: min({args.test.envmap_norm_min_scale}) > max({args.test.envmap_norm_max_scale}). '

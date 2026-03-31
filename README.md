@@ -168,6 +168,8 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
   - Note: if you accidentally set `--envmap_norm_min_scale` twice (and forget `--envmap_norm_max_scale`), the second value overwrites min and can force over-bright results.
 - `--use_gt_envmap`: use the loaded envmap directly for test-time relighting instead of SH approximation.
 - `--use_envmap_direct`: use a higher-frequency envmap diffuse approximation (multi-direction envmap sampling) at test time.
+- `--match_direct_envmap_energy` (default on): rescale direct-envmap diffuse energy to match SH branch brightness and avoid overly dark results.
+- `--no_match_direct_envmap_energy`: disable this brightness matching.
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
   - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
 
