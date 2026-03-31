@@ -230,9 +230,13 @@ def testing(args: Config):
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
     if getattr(args.test, 'save_light_envmap', False):
-        envmap_path = path.join(args.out_dir, 'optimized_light_envmap.png')
-        gaussians.export_deferred_envmap(envmap_path)
-        print(f'Saved optimized light envmap to: {envmap_path}')
+        envmap_sh_path = path.join(args.out_dir, 'optimized_light_envmap_sh.png')
+        gaussians.export_deferred_envmap(envmap_sh_path)
+        print(f'Saved SH-projected light envmap to: {envmap_sh_path}')
+        if args.test.envmap_path is not None and bool(getattr(args.test, 'use_envmap_direct', False) or getattr(args.test, 'use_gt_envmap', False)):
+            envmap_gt_path = path.join(args.out_dir, 'input_envmap_used.png')
+            gaussians.export_loaded_envmap(envmap_gt_path)
+            print(f'Saved loaded envmap used by direct relighting to: {envmap_gt_path}')
 
     # Dataset
     test_frame_ids = np.arange(args.test.begin_ith_frame, args.test.begin_ith_frame+args.test.frame_interval*args.test.num_frame, args.test.frame_interval).tolist()

@@ -172,6 +172,7 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
 - `--no_match_direct_envmap_energy`: disable this brightness matching.
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
   - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
+- `--save_light_envmap`: exports `optimized_light_envmap_sh.png` (always SH-projected). If `--use_gt_envmap`/`--use_envmap_direct` is on, it also exports `input_envmap_used.png` (the loaded envmap used for direct relighting).
 
 You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--envmap_path`.
 
