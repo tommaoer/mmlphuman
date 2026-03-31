@@ -661,13 +661,13 @@ class GaussianModel:
         n = torch.where(alpha > 1e-3, n, torch.zeros_like(n))
         return n
 
-    def _sample_envmap(self, normals):
+    def _sample_envmap_dirs(self, dirs):
         if self.deferred_envmap is None:
             return None
         env = self.deferred_envmap
-        if env.device != normals.device:
-            env = env.to(normals.device)
-        dirs = F.normalize(normals, dim=-1)
+        if env.device != dirs.device:
+            env = env.to(dirs.device)
+        dirs = F.normalize(dirs, dim=-1)
         x, y, z = dirs.unbind(dim=-1)
         theta = torch.acos(torch.clamp(z, -1.0, 1.0))
         phi = torch.atan2(y, x)
@@ -677,6 +677,32 @@ class GaussianModel:
         env_tex = env.permute(2, 0, 1)[None]
         sampled = F.grid_sample(env_tex, grid, mode='bilinear', padding_mode='border', align_corners=False)
         return sampled[0].permute(1, 2, 0)
+
+    def _sample_envmap_diffuse(self, normals):
+        n = F.normalize(normals, dim=-1)
+        up = torch.tensor([0.0, 0.0, 1.0], device=n.device, dtype=n.dtype).view(1, 1, 3).expand_as(n)
+        alt_up = torch.tensor([0.0, 1.0, 0.0], device=n.device, dtype=n.dtype).view(1, 1, 3).expand_as(n)
+        use_alt = (torch.abs((n * up).sum(dim=-1, keepdim=True)) > 0.95)
+        up = torch.where(use_alt, alt_up, up)
+
+        tangent = F.normalize(torch.cross(up, n, dim=-1), dim=-1)
+        bitangent = F.normalize(torch.cross(n, tangent, dim=-1), dim=-1)
+
+        local_dirs = torch.tensor([
+            [0.0, 0.0, 1.0],
+            [0.5, 0.0, 0.8660254],
+            [-0.5, 0.0, 0.8660254],
+            [0.0, 0.5, 0.8660254],
+            [0.0, -0.5, 0.8660254],
+        ], dtype=n.dtype, device=n.device)
+        weights = torch.tensor([0.4, 0.15, 0.15, 0.15, 0.15], dtype=n.dtype, device=n.device)
+
+        lit = 0.0
+        for i in range(local_dirs.shape[0]):
+            ld = local_dirs[i]
+            world_dir = tangent * ld[0] + bitangent * ld[1] + n * ld[2]
+            lit = lit + weights[i] * self._sample_envmap_dirs(world_dir)
+        return lit
 
     def render_deferred(self, cam, background=None, scaling_modifier=1.0):
         covars = self.get_covariance(scaling_modifier)
@@ -700,7 +726,7 @@ class GaussianModel:
         specular = torch.clamp(specular / denom, 0.0, 1.0)
 
         if self.use_direct_envmap and self.deferred_envmap is not None:
-            diffuse_light = self._sample_envmap(normal)
+            diffuse_light = self._sample_envmap_diffuse(normal)
         else:
             sh_basis = self._eval_sh9(normal)
             diffuse_light = torch.einsum('hwc,ck->hwk', sh_basis, self.deferred_light_sh) + self.deferred_light_dc
