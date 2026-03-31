@@ -184,6 +184,8 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
 - `--output_linear`: save linear outputs directly (no sRGB conversion).
 - `--use_geom_normal_for_lighting`: use geometry normals (`normal_geom`) for deferred lighting instead of learned normals.
 - `--flip_normal_towards_camera`: flip lighting normals to face camera (useful when back-facing normals cause dark back side).
+- `--convert_lighting_normal_to_world` (default on): convert lighting normals from camera space to world space before envmap/SH lookup.
+- `--no_convert_lighting_normal_to_world`: disable this conversion.
 
 You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--envmap_path`.
 

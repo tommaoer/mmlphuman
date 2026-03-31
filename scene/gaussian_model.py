@@ -102,6 +102,7 @@ class GaussianModel:
         self.match_direct_envmap_energy = True
         self.use_geom_normal_for_lighting = False
         self.flip_normal_towards_camera = False
+        self.convert_lighting_normal_to_world = False
 
         # lbs weights
         self._weights = None
@@ -742,6 +743,10 @@ class GaussianModel:
 
         normal_lit = normal_geom if self.use_geom_normal_for_lighting else normal
         normal_lit = F.normalize(normal_lit, dim=-1)
+        if self.convert_lighting_normal_to_world:
+            c2w = torch.linalg.inv_ex(cam['w2c'])[0][:3, :3]
+            normal_lit = torch.einsum('ij,hwj->hwi', c2w, normal_lit)
+            normal_lit = F.normalize(normal_lit, dim=-1)
         if self.flip_normal_towards_camera:
             facing = torch.sign((normal_lit * view_dir).sum(dim=-1, keepdim=True))
             facing = torch.where(facing == 0, torch.ones_like(facing), facing)

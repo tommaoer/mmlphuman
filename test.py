@@ -238,6 +238,7 @@ def testing(args: Config):
     gaussians.match_direct_envmap_energy = getattr(args.test, 'match_direct_envmap_energy', True)
     gaussians.use_geom_normal_for_lighting = getattr(args.test, 'use_geom_normal_for_lighting', False)
     gaussians.flip_normal_towards_camera = getattr(args.test, 'flip_normal_towards_camera', False)
+    gaussians.convert_lighting_normal_to_world = getattr(args.test, 'convert_lighting_normal_to_world', True)
     background = torch.as_tensor(np.array(args.background)).float().cuda()
     if args.test.envmap_path is not None:
         relight_cfg = gaussians.load_envmap_lighting(
@@ -334,9 +335,12 @@ if __name__ == "__main__":
     parser.add_argument('--output_linear', dest='output_srgb', action='store_false')
     parser.add_argument('--use_geom_normal_for_lighting', action='store_true')
     parser.add_argument('--flip_normal_towards_camera', action='store_true')
+    parser.add_argument('--convert_lighting_normal_to_world', dest='convert_lighting_normal_to_world', action='store_true')
+    parser.add_argument('--no_convert_lighting_normal_to_world', dest='convert_lighting_normal_to_world', action='store_false')
     parser.set_defaults(envmap_auto_normalize=True)
     parser.set_defaults(match_direct_envmap_energy=True)
     parser.set_defaults(output_srgb=True)
+    parser.set_defaults(convert_lighting_normal_to_world=True)
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
@@ -358,6 +362,7 @@ if __name__ == "__main__":
     args.test.output_srgb = pargs.output_srgb
     args.test.use_geom_normal_for_lighting = pargs.use_geom_normal_for_lighting
     args.test.flip_normal_towards_camera = pargs.flip_normal_towards_camera
+    args.test.convert_lighting_normal_to_world = pargs.convert_lighting_normal_to_world
     if pargs.pure_gt_envmap:
         args.test.use_gt_envmap = True
         args.test.use_envmap_direct = True
