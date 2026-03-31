@@ -224,6 +224,7 @@ def testing(args: Config):
             getattr(args.test, 'envmap_target_avg', 0.5),
             getattr(args.test, 'envmap_norm_min_scale', 0.25),
             getattr(args.test, 'envmap_norm_max_scale', 4.0),
+            getattr(args.test, 'use_envmap_direct', False),
         )
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
@@ -281,6 +282,7 @@ if __name__ == "__main__":
     parser.add_argument('--envmap_target_avg', type=float, default=0.5)
     parser.add_argument('--envmap_norm_min_scale', type=float, default=0.25)
     parser.add_argument('--envmap_norm_max_scale', type=float, default=4.0)
+    parser.add_argument('--use_envmap_direct', action='store_true')
     parser.set_defaults(envmap_auto_normalize=True)
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
@@ -296,6 +298,7 @@ if __name__ == "__main__":
     args.test.envmap_target_avg = pargs.envmap_target_avg
     args.test.envmap_norm_min_scale = pargs.envmap_norm_min_scale
     args.test.envmap_norm_max_scale = pargs.envmap_norm_max_scale
+    args.test.use_envmap_direct = pargs.use_envmap_direct
     if args.test.envmap_norm_min_scale > args.test.envmap_norm_max_scale:
         raise ValueError(
             f'Invalid envmap normalization range: min({args.test.envmap_norm_min_scale}) > max({args.test.envmap_norm_max_scale}). '
