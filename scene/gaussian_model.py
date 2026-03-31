@@ -88,9 +88,11 @@ class GaussianModel:
         self.use_deferredgs = False
         self.deferred_light_sh = torch.empty(0)
         self.deferred_light_dc = torch.empty(0)
+        self.enable_specular_relight = False
         self.use_direct_envmap = False
+        self.envmap_diffuse_mode = 'direct'
+        self.deferred_envmap_input = torch.empty(0)
         self.deferred_envmap = torch.empty(0)
-        self.force_diffuse_shading = False
 
         # lbs weights
         self._weights = None
@@ -683,7 +685,16 @@ class GaussianModel:
         roughness = torch.clamp(roughness / denom, 0.0, 1.0)
         specular = torch.clamp(specular / denom, 0.0, 1.0)
 
-        if bool(getattr(self, 'use_direct_envmap', False)) and torch.is_tensor(self.deferred_envmap) and self.deferred_envmap.numel() > 0:
+        use_direct = (
+            bool(getattr(self, 'use_direct_envmap', False))
+            and torch.is_tensor(self.deferred_envmap)
+            and self.deferred_envmap.numel() > 0
+        )
+        diffuse_mode = str(getattr(self, 'envmap_diffuse_mode', 'direct')).lower()
+        if diffuse_mode not in ('direct', 'sh'):
+            diffuse_mode = 'direct'
+
+        if use_direct and diffuse_mode == 'direct':
             diffuse_light = self._sample_envmap(normal)
         else:
             sh_basis = self._eval_sh9(normal)
@@ -693,13 +704,13 @@ class GaussianModel:
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
         view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
         half_vec = F.normalize(view_dir + torch.tensor([0.0, 0.0, 1.0], device=view_dir.device), dim=-1)
-        if bool(getattr(self, 'force_diffuse_shading', False)):
-            spec_term = torch.zeros_like(alpha)
-            specular = torch.zeros_like(specular)
-        else:
+        if bool(getattr(self, 'enable_specular_relight', False)):
             spec_pow = 4.0 + (1.0 - roughness) * 60.0
             spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
-        shaded = albedo * diffuse_light + specular * spec_term
+            specular_term = specular * spec_term
+        else:
+            specular_term = torch.zeros_like(albedo)
+        shaded = albedo * diffuse_light + specular_term
         if background is not None:
             shaded = shaded * alpha + background[None, None] * (1.0 - alpha)
 
@@ -738,6 +749,8 @@ class GaussianModel:
             light_dc = torch.as_tensor(light_dc, dtype=self.deferred_light_dc.dtype, device=self.deferred_light_dc.device)
             self.deferred_light_dc.copy_(light_dc.reshape_as(self.deferred_light_dc))
         self.use_direct_envmap = False
+        self.envmap_diffuse_mode = 'sh'
+        self.deferred_envmap_input = torch.empty(0, device=self.deferred_light_sh.device, dtype=self.deferred_light_sh.dtype)
         self.deferred_envmap = torch.empty(0, device=self.deferred_light_sh.device, dtype=self.deferred_light_sh.dtype)
         self.cache_dict = {}
 
@@ -755,13 +768,24 @@ class GaussianModel:
         return data
 
     @torch.no_grad()
-    def load_envmap_lighting(self, envmap_path, intensity=1.0, auto_rescale=True, target_avg=0.5):
+    def load_envmap_lighting(self, envmap_path, intensity=1.0, auto_rescale=True, target_avg=0.5, diffuse_mode='direct'):
         import imageio.v3 as iio
 
-        env = iio.imread(envmap_path).astype(np.float32)
-        if env.max() > 1.0:
-            env = env / 255.0
+        env_raw = iio.imread(envmap_path)
+        raw_min = float(np.min(env_raw))
+        raw_max = float(np.max(env_raw))
+        raw_mean = float(np.mean(env_raw))
+        if np.issubdtype(env_raw.dtype, np.integer):
+            # LDR integer formats (png/jpg/...) are normalized to [0,1].
+            maxv = float(np.iinfo(env_raw.dtype).max)
+            env = env_raw.astype(np.float32) / max(maxv, 1.0)
+            input_kind = 'ldr_integer'
+        else:
+            # HDR float formats (hdr/exr/...) are already linear radiance; keep absolute scale.
+            env = env_raw.astype(np.float32)
+            input_kind = 'hdr_float'
         env = np.clip(env[..., :3], 0.0, None)
+        env_input = env.copy()
         applied_rescale = 1.0
         if auto_rescale:
             lum = 0.2126 * env[..., 0] + 0.7152 * env[..., 1] + 0.0722 * env[..., 2]
@@ -792,7 +816,9 @@ class GaussianModel:
         self._ensure_deferred_params()
         self.use_deferredgs = True
         self.set_deferred_lighting(light_sh=coeff, light_dc=np.zeros(3, dtype=np.float32))
-        self.use_direct_envmap = True
+        self.envmap_diffuse_mode = str(diffuse_mode).lower()
+        self.use_direct_envmap = self.envmap_diffuse_mode == 'direct'
+        self.deferred_envmap_input = torch.as_tensor(env_input, dtype=self.deferred_light_sh.dtype, device=self.deferred_light_sh.device)
         self.deferred_envmap = torch.as_tensor(env, dtype=self.deferred_light_sh.dtype, device=self.deferred_light_sh.device)
         return dict(
             light_sh=coeff.tolist(),
@@ -802,7 +828,27 @@ class GaussianModel:
             auto_rescale=bool(auto_rescale),
             rescale_factor=float(applied_rescale),
             target_avg=float(target_avg),
+            diffuse_mode=self.envmap_diffuse_mode,
+            input_kind=input_kind,
+            raw_dtype=str(env_raw.dtype),
+            raw_min=raw_min,
+            raw_max=raw_max,
+            raw_mean=raw_mean,
+            input_envmap_mean=float(env_input.mean()),
+            output_envmap_mean=float(env.mean()),
         )
+
+    @torch.no_grad()
+    def apply_relight_material_preset(self, preset='checkpoint'):
+        preset = str(preset).lower()
+        if preset == 'checkpoint':
+            return
+        self._ensure_deferred_params()
+        if preset == 'matte':
+            albedo_rgb = torch.full_like(self.get_cano_albedo, 0.7)
+            self._albedo.copy_(self.inverse_color_activation(albedo_rgb))
+            self._specular.copy_(torch.full_like(self._specular, self.inverse_opacity_activation(torch.tensor(0.0, device=self._specular.device))))
+            self._roughness.copy_(torch.full_like(self._roughness, self.inverse_opacity_activation(torch.tensor(1.0, device=self._roughness.device))))
 
     @torch.no_grad()
     def export_deferred_envmap(self, output_path, height=256, width=512):
@@ -824,9 +870,24 @@ class GaussianModel:
             env = np.einsum('hwc,ck->hwk', basis, light_sh) + light_dc[None, None]
             env = np.clip(env, 0.0, None)
 
-        import imageio.v3 as iio
-        iio.imwrite(output_path, np.clip(env * 255.0, 0, 255).astype(np.uint8))
+        self._write_envmap_preview(output_path, env)
         return env
+
+    @torch.no_grad()
+    def export_input_envmap(self, output_path):
+        if (not torch.is_tensor(self.deferred_envmap_input)) or self.deferred_envmap_input.numel() == 0:
+            return None
+        env = self.deferred_envmap_input.detach().cpu().numpy()
+        self._write_envmap_preview(output_path, env)
+        return env
+
+    def _write_envmap_preview(self, output_path, env):
+        env = np.clip(env, 0.0, None)
+        # Save PNG as tone-mapped preview (HDR linear values can look almost black in naive 8-bit export).
+        env_tm = env / (1.0 + env)
+        env_tm = np.power(np.clip(env_tm, 0.0, 1.0), 1.0 / 2.2)
+        import imageio.v3 as iio
+        iio.imwrite(output_path, np.clip(env_tm * 255.0, 0, 255).astype(np.uint8))
 
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]

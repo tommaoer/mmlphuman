@@ -116,13 +116,22 @@ python test.py \
   --envmap_path {ENVMAP_FILE} \
   --envmap_intensity 1.0 \
   --envmap_target_avg 0.5 \
+  --envmap_diffuse_mode direct \
   --save_deferred_buffers
 ```
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
 By default, an auto-rescale step normalizes mean luminance to `envmap_target_avg`; disable it with `--disable_envmap_auto_rescale`.
-By default, relighting uses diffuse-only shading to avoid inherited specular artifacts from checkpoints; use `--enable_specular_relight` to enable specular again.
-If `--save_light_envmap` is set, the envmap actually used for rendering is exported as `optimized_light_envmap.png`.
+Use `--envmap_diffuse_mode direct` to sample diffuse light directly from the envmap (preserves high-frequency details), or `--envmap_diffuse_mode sh` to use SH-only diffuse lighting (smoother/low-frequency).
+HDR float envmaps (`.hdr/.exr`) are loaded in linear radiance (no 1/255 scaling); integer LDR images (`.png/.jpg`) are normalized to `[0,1]`.
+By default, relighting disables specular to avoid sparkle artifacts on legacy checkpoints; set `--enable_specular_relight` if you want to include specular highlights.
+By default, relighting uses `--relight_material matte` to avoid baked/high-contrast SH colors from legacy checkpoints; use `--relight_material checkpoint` to keep checkpoint material attributes.
+When an envmap is loaded, `test.py` prints `raw_dtype/raw_min/raw_max/raw_mean` in `relight_cfg` so you can verify HDR values are not incorrectly treated as 255-based LDR.
+If `--save_light_envmap` is set, two files are exported:
+- `optimized_light_envmap.png`: tone-mapped preview of the envmap used for relighting (after auto-rescale + intensity).
+- `input_light_envmap.png`: tone-mapped preview of the input envmap before auto-rescale/intensity.
+- `optimized_light_envmap.npy` / `input_light_envmap.npy`: raw linear HDR arrays (for exact numeric comparison).
+So if auto-rescale is enabled (default), input/output can look different, and PNG previews are tone-mapped for visibility.
 
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
   - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
