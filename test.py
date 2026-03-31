@@ -254,11 +254,11 @@ def testing(args: Config):
         envmap_sh_path = path.join(args.out_dir, 'optimized_light_envmap_sh.png')
         gaussians.export_deferred_envmap(envmap_sh_path)
         print(f'Saved SH-projected light envmap to: {envmap_sh_path}')
-        if args.test.envmap_path is not None and bool(getattr(args.test, 'use_envmap_direct', False) or getattr(args.test, 'use_gt_envmap', False)):
+        if args.test.envmap_path is not None:
             envmap_gt_preview_path = path.join(args.out_dir, 'input_envmap_used_preview.png')
             envmap_gt_raw_path = path.join(args.out_dir, 'input_envmap_used_raw.npy')
             gaussians.export_loaded_envmap(envmap_gt_preview_path, raw_output_path=envmap_gt_raw_path)
-            print(f'Saved loaded envmap preview used by direct relighting to: {envmap_gt_preview_path}')
+            print(f'Saved loaded envmap preview to: {envmap_gt_preview_path}')
             print(f'Saved loaded envmap raw HDR values to: {envmap_gt_raw_path}')
 
     # Dataset
