@@ -217,12 +217,14 @@ def testing(args: Config):
     gaussians.prepare_test()
     background = torch.as_tensor(np.array(args.background)).float().cuda()
     if args.test.envmap_path is not None:
-        gaussians.force_diffuse_shading = not getattr(args.test, 'enable_specular_relight', False)
         relight_cfg = gaussians.load_envmap_lighting(
             args.test.envmap_path,
             args.test.envmap_intensity,
-            auto_rescale=(not getattr(args.test, 'disable_envmap_auto_rescale', False)),
-            target_avg=getattr(args.test, 'envmap_target_avg', 0.5),
+            getattr(args.test, 'envmap_auto_normalize', True),
+            getattr(args.test, 'envmap_target_avg', 0.5),
+            getattr(args.test, 'envmap_norm_min_scale', 0.25),
+            getattr(args.test, 'envmap_norm_max_scale', 4.0),
+            getattr(args.test, 'use_envmap_direct', False),
         )
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
@@ -275,9 +277,13 @@ if __name__ == "__main__":
     parser.add_argument('--pose_path', type=str, default=None)
     parser.add_argument('--envmap_path', type=str, default=None)
     parser.add_argument('--envmap_intensity', type=float, default=1.0)
-    parser.add_argument('--disable_envmap_auto_rescale', action='store_true')
+    parser.add_argument('--envmap_auto_normalize', dest='envmap_auto_normalize', action='store_true')
+    parser.add_argument('--no_envmap_auto_normalize', dest='envmap_auto_normalize', action='store_false')
     parser.add_argument('--envmap_target_avg', type=float, default=0.5)
-    parser.add_argument('--enable_specular_relight', action='store_true')
+    parser.add_argument('--envmap_norm_min_scale', type=float, default=0.25)
+    parser.add_argument('--envmap_norm_max_scale', type=float, default=4.0)
+    parser.add_argument('--use_envmap_direct', action='store_true')
+    parser.set_defaults(envmap_auto_normalize=True)
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
@@ -288,9 +294,16 @@ if __name__ == "__main__":
     args.data_dir, args.out_dir, args.model_dir, args.test.cam_path, args.test.pose_path = pargs.data_dir, pargs.out_dir, pargs.model_dir, pargs.cam_path, pargs.pose_path
     args.test.envmap_path = pargs.envmap_path
     args.test.envmap_intensity = pargs.envmap_intensity
-    args.test.disable_envmap_auto_rescale = pargs.disable_envmap_auto_rescale
+    args.test.envmap_auto_normalize = pargs.envmap_auto_normalize
     args.test.envmap_target_avg = pargs.envmap_target_avg
-    args.test.enable_specular_relight = pargs.enable_specular_relight
+    args.test.envmap_norm_min_scale = pargs.envmap_norm_min_scale
+    args.test.envmap_norm_max_scale = pargs.envmap_norm_max_scale
+    args.test.use_envmap_direct = pargs.use_envmap_direct
+    if args.test.envmap_norm_min_scale > args.test.envmap_norm_max_scale:
+        raise ValueError(
+            f'Invalid envmap normalization range: min({args.test.envmap_norm_min_scale}) > max({args.test.envmap_norm_max_scale}). '
+            'Did you mean to set --envmap_norm_max_scale?'
+        )
     args.test.save_light_envmap = pargs.save_light_envmap
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed
