@@ -727,7 +727,15 @@ class GaussianModel:
         return data
 
     @torch.no_grad()
-    def load_envmap_lighting(self, envmap_path, intensity=1.0, auto_normalize=True, target_avg=0.5):
+    def load_envmap_lighting(
+        self,
+        envmap_path,
+        intensity=1.0,
+        auto_normalize=True,
+        target_avg=0.5,
+        norm_min_scale=0.25,
+        norm_max_scale=4.0,
+    ):
         import imageio.v3 as iio
 
         env = np.asarray(iio.imread(envmap_path))
@@ -739,13 +747,17 @@ class GaussianModel:
         env = np.nan_to_num(env, nan=0.0, posinf=0.0, neginf=0.0)
         env = np.clip(env[..., :3], 0.0, None)
 
-        avg_before = float(env.mean())
+        luma = env[..., 0] * 0.2126 + env[..., 1] * 0.7152 + env[..., 2] * 0.0722
+        avg_before = float(luma.mean())
         normalize_scale = 1.0
+        normalize_scale_unclamped = 1.0
         if auto_normalize and target_avg > 0:
-            normalize_scale = float(target_avg) / max(avg_before, 1e-6)
+            normalize_scale_unclamped = float(target_avg) / max(avg_before, 1e-6)
+            normalize_scale = float(np.clip(normalize_scale_unclamped, norm_min_scale, norm_max_scale))
             env = env * normalize_scale
         env = env * float(intensity)
-        avg_after = float(env.mean())
+        luma_after = env[..., 0] * 0.2126 + env[..., 1] * 0.7152 + env[..., 2] * 0.0722
+        avg_after = float(luma_after.mean())
         H, W = env.shape[:2]
 
         theta = (np.arange(H, dtype=np.float32) + 0.5) / H * np.pi
@@ -775,7 +787,11 @@ class GaussianModel:
             intensity=float(intensity),
             auto_normalize=bool(auto_normalize),
             target_avg=float(target_avg),
+            norm_min_scale=float(norm_min_scale),
+            norm_max_scale=float(norm_max_scale),
             normalize_scale=float(normalize_scale),
+            normalize_scale_unclamped=float(normalize_scale_unclamped),
+            normalize_scale_was_clamped=bool(abs(normalize_scale - normalize_scale_unclamped) > 1e-6),
             avg_before=float(avg_before),
             avg_after=float(avg_after),
         )

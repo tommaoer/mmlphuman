@@ -95,10 +95,13 @@ python train.py \
   --train_envmap_path {ENVMAP_FILE} \
   --train_envmap_intensity 1.0 \
   --train_envmap_auto_normalize \
-  --train_envmap_target_avg 0.5
+  --train_envmap_target_avg 0.5 \
+  --train_envmap_norm_min_scale 0.25 \
+  --train_envmap_norm_max_scale 4.0
 ```
 
 - `--no_train_envmap_auto_normalize` can be used for raw HDR initialization without average-brightness normalization.
+- `--train_envmap_norm_min_scale` / `--train_envmap_norm_max_scale` clamp the normalization gain to avoid overly dark/bright initialization.
 
 ### Canonical-space deferredGS training
 
@@ -162,6 +165,8 @@ python test.py \
   --envmap_intensity 1.0 \
   --envmap_auto_normalize \
   --envmap_target_avg 0.5 \
+  --envmap_norm_min_scale 0.25 \
+  --envmap_norm_max_scale 4.0 \
   --save_deferred_buffers
 ```
 
@@ -170,6 +175,7 @@ The script projects the environment map to 2nd-order SH (9 coefficients) and use
 - `--envmap_auto_normalize` (default enabled): normalize envmap average luminance to `--envmap_target_avg` before applying intensity.
 - `--no_envmap_auto_normalize`: disable the normalization for raw HDR intensity comparison.
 - `--envmap_intensity`: final multiplicative scale after optional normalization.
+- `--envmap_norm_min_scale` / `--envmap_norm_max_scale`: clamp auto-normalization gain to avoid severe over/under exposure.
 
 For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
 - albedo from the model's SH0 color term (instead of fixed gray),

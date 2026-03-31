@@ -53,6 +53,8 @@ def training(args: Config):
             getattr(args, 'train_envmap_intensity', 1.0),
             getattr(args, 'train_envmap_auto_normalize', True),
             getattr(args, 'train_envmap_target_avg', 0.5),
+            getattr(args, 'train_envmap_norm_min_scale', 0.25),
+            getattr(args, 'train_envmap_norm_max_scale', 4.0),
         )
         print(f'Initialized training deferred light from envmap: {args.train_envmap_path}')
         print({
@@ -257,6 +259,8 @@ if __name__ == "__main__":
     parser.add_argument('--train_envmap_auto_normalize', dest='train_envmap_auto_normalize', action='store_true')
     parser.add_argument('--no_train_envmap_auto_normalize', dest='train_envmap_auto_normalize', action='store_false')
     parser.add_argument('--train_envmap_target_avg', type=float, default=0.5)
+    parser.add_argument('--train_envmap_norm_min_scale', type=float, default=0.25)
+    parser.add_argument('--train_envmap_norm_max_scale', type=float, default=4.0)
     parser.set_defaults(train_envmap_auto_normalize=True)
     pargs = parser.parse_args(sys.argv[1:])
 
@@ -267,6 +271,8 @@ if __name__ == "__main__":
     args.train_envmap_intensity = pargs.train_envmap_intensity
     args.train_envmap_auto_normalize = pargs.train_envmap_auto_normalize
     args.train_envmap_target_avg = pargs.train_envmap_target_avg
+    args.train_envmap_norm_min_scale = pargs.train_envmap_norm_min_scale
+    args.train_envmap_norm_max_scale = pargs.train_envmap_norm_max_scale
     os.makedirs(args.out_dir, exist_ok = True)
 
     OmegaConf.save(args, path.join(args.out_dir, 'config.yaml'))
