@@ -839,6 +839,18 @@ class GaussianModel:
         )
 
     @torch.no_grad()
+    def apply_relight_material_preset(self, preset='checkpoint'):
+        preset = str(preset).lower()
+        if preset == 'checkpoint':
+            return
+        self._ensure_deferred_params()
+        if preset == 'matte':
+            albedo_rgb = torch.full_like(self.get_cano_albedo, 0.7)
+            self._albedo.copy_(self.inverse_color_activation(albedo_rgb))
+            self._specular.copy_(torch.full_like(self._specular, self.inverse_opacity_activation(torch.tensor(0.0, device=self._specular.device))))
+            self._roughness.copy_(torch.full_like(self._roughness, self.inverse_opacity_activation(torch.tensor(1.0, device=self._roughness.device))))
+
+    @torch.no_grad()
     def export_deferred_envmap(self, output_path, height=256, width=512):
         if bool(getattr(self, 'use_direct_envmap', False)) and torch.is_tensor(self.deferred_envmap) and self.deferred_envmap.numel() > 0:
             env = self.deferred_envmap.detach().cpu().numpy()

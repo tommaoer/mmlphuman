@@ -225,6 +225,7 @@ def testing(args: Config):
             target_avg=getattr(args.test, 'envmap_target_avg', 0.5),
             diffuse_mode=getattr(args.test, 'envmap_diffuse_mode', 'direct'),
         )
+        gaussians.apply_relight_material_preset(getattr(args.test, 'relight_material', 'matte'))
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
     if getattr(args.test, 'save_light_envmap', False):
@@ -290,6 +291,7 @@ if __name__ == "__main__":
     parser.add_argument('--envmap_target_avg', type=float, default=0.5)
     parser.add_argument('--envmap_diffuse_mode', type=str, default='direct', choices=['direct', 'sh'])
     parser.add_argument('--enable_specular_relight', action='store_true')
+    parser.add_argument('--relight_material', type=str, default='matte', choices=['matte', 'checkpoint'])
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
@@ -304,6 +306,7 @@ if __name__ == "__main__":
     args.test.envmap_target_avg = pargs.envmap_target_avg
     args.test.envmap_diffuse_mode = pargs.envmap_diffuse_mode
     args.test.enable_specular_relight = pargs.enable_specular_relight
+    args.test.relight_material = pargs.relight_material
     args.test.save_light_envmap = pargs.save_light_envmap
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed
