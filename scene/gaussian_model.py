@@ -914,8 +914,7 @@ class GaussianModel:
         env = np.clip(env, 0.0, None)
         if raw_output_path is not None:
             np.save(raw_output_path, env.astype(np.float32))
-        env_vis = env / (1.0 + env)
-        env_vis = GaussianModel._linear_to_srgb_np(env_vis)
+        env_vis = GaussianModel._linear_to_srgb_np(env)
         import imageio.v3 as iio
         iio.imwrite(output_path, np.clip(env_vis * 255.0, 0, 255).astype(np.uint8))
         return env
