@@ -730,9 +730,13 @@ class GaussianModel:
     def load_envmap_lighting(self, envmap_path, intensity=1.0):
         import imageio.v3 as iio
 
-        env = iio.imread(envmap_path).astype(np.float32)
-        if env.max() > 1.0:
-            env = env / 255.0
+        env = np.asarray(iio.imread(envmap_path))
+        if np.issubdtype(env.dtype, np.integer):
+            dtype_max = float(np.iinfo(env.dtype).max)
+            env = env.astype(np.float32) / max(dtype_max, 1.0)
+        else:
+            env = env.astype(np.float32)
+        env = np.nan_to_num(env, nan=0.0, posinf=0.0, neginf=0.0)
         env = np.clip(env[..., :3], 0.0, None) * float(intensity)
         H, W = env.shape[:2]
 
