@@ -167,7 +167,7 @@ def testing_novel_cam_pose_speed(gaussians: GaussianModel, out_dir, frame_ids, p
     print('Running time:', run_time)
     print('FPS:', fps)
 
-def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_list, cam, background, save_buffers=False, output_srgb=True):
+def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_list, cam, background, save_buffers=False, output_srgb=True, debug_material_stats=False):
 
     os.makedirs(path.join(out_dir), exist_ok=True)
     for frame_id in tqdm(frame_ids):
@@ -178,6 +178,13 @@ def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_li
         gaussians.Th = torch.clone(torch.as_tensor(pose['Th']).cpu())
         gaussians.Rh = torch.as_tensor(pose['Rh']).cpu()
         image, alpha, info = render_frame(gaussians, cam, background)
+        if debug_material_stats and getattr(gaussians, 'use_deferredgs', False):
+            print(
+                f"[material] frame={frame_id} "
+                f"roughness(min/mean/max)=({info['roughness'].min().item():.4f}/{info['roughness'].mean().item():.4f}/{info['roughness'].max().item():.4f}) "
+                f"specular(min/mean/max)=({info['specular'].min().item():.4f}/{info['specular'].mean().item():.4f}/{info['specular'].max().item():.4f})"
+            )
+            debug_material_stats = False
 
         image = _to_png_uint8(image, output_srgb=output_srgb)
         iio.imwrite(path.join(out_dir, f'{frame_id:08d}.png'), image)
@@ -185,7 +192,7 @@ def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_li
             save_deferred_buffers(info, out_dir, frame_id)
 
 
-def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save_buffers=False, output_srgb=True):
+def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save_buffers=False, output_srgb=True, debug_material_stats=False):
     test_dataloader = DataLoader(
         dataset=dataset,
         batch_size=1,
@@ -205,6 +212,13 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save
         gaussians.Th, gaussians.Rh = cam['Th'], cam['Rh']
 
         image, alpha, info = render_frame(gaussians, cam, background)
+        if debug_material_stats and getattr(gaussians, 'use_deferredgs', False):
+            print(
+                f"[material] frame={frame_id} "
+                f"roughness(min/mean/max)=({info['roughness'].min().item():.4f}/{info['roughness'].mean().item():.4f}/{info['roughness'].max().item():.4f}) "
+                f"specular(min/mean/max)=({info['specular'].min().item():.4f}/{info['specular'].mean().item():.4f}/{info['specular'].max().item():.4f})"
+            )
+            debug_material_stats = False
 
         image = _to_png_uint8(image, output_srgb=output_srgb)
 
@@ -241,6 +255,8 @@ def testing(args: Config):
     gaussians.convert_lighting_normal_to_world = getattr(args.test, 'convert_lighting_normal_to_world', True)
     gaussians.direct_envmap_single_sample = getattr(args.test, 'direct_envmap_single_sample', False)
     gaussians.relight_specular_scale = getattr(args.test, 'relight_specular_scale', 1.0)
+    gaussians.relight_override_roughness = getattr(args.test, 'relight_override_roughness', None)
+    gaussians.relight_override_specular = getattr(args.test, 'relight_override_specular', None)
     background = torch.as_tensor(np.array(args.background)).float().cuda()
     if args.test.envmap_path is not None:
         relight_cfg = gaussians.load_envmap_lighting(
@@ -289,6 +305,7 @@ def testing(args: Config):
                 gaussians, args.out_dir, test_frame_ids, pose_list, cam, background,
                 save_buffers=args.test.save_deferred_buffers,
                 output_srgb=getattr(args.test, 'output_srgb', True),
+                debug_material_stats=getattr(args.test, 'debug_material_stats', False),
             )
     else:
         DatasetType = get_dataset_type(args.data_dir)
@@ -308,6 +325,7 @@ def testing(args: Config):
             gaussians, args.out_dir, testset, background,
             save_buffers=args.test.save_deferred_buffers,
             output_srgb=getattr(args.test, 'output_srgb', True),
+            debug_material_stats=getattr(args.test, 'debug_material_stats', False),
         )
 
 if __name__ == "__main__":
@@ -341,6 +359,9 @@ if __name__ == "__main__":
     parser.add_argument('--no_convert_lighting_normal_to_world', dest='convert_lighting_normal_to_world', action='store_false')
     parser.add_argument('--direct_envmap_single_sample', action='store_true')
     parser.add_argument('--relight_specular_scale', type=float, default=1.0)
+    parser.add_argument('--relight_override_roughness', type=float, default=None)
+    parser.add_argument('--relight_override_specular', type=float, default=None)
+    parser.add_argument('--debug_material_stats', action='store_true')
     parser.set_defaults(envmap_auto_normalize=True)
     parser.set_defaults(match_direct_envmap_energy=True)
     parser.set_defaults(output_srgb=True)
@@ -369,12 +390,19 @@ if __name__ == "__main__":
     args.test.convert_lighting_normal_to_world = pargs.convert_lighting_normal_to_world
     args.test.direct_envmap_single_sample = pargs.direct_envmap_single_sample
     args.test.relight_specular_scale = pargs.relight_specular_scale
+    args.test.relight_override_roughness = pargs.relight_override_roughness
+    args.test.relight_override_specular = pargs.relight_override_specular
+    args.test.debug_material_stats = pargs.debug_material_stats
     if pargs.pure_gt_envmap:
         args.test.use_gt_envmap = True
         args.test.use_envmap_direct = True
         args.test.match_direct_envmap_energy = False
         args.test.direct_envmap_single_sample = True
         args.test.relight_specular_scale = 0.0
+        if args.test.relight_override_roughness is None:
+            args.test.relight_override_roughness = 1.0
+        if args.test.relight_override_specular is None:
+            args.test.relight_override_specular = 0.0
     if args.test.envmap_norm_min_scale > args.test.envmap_norm_max_scale:
         raise ValueError(
             f'Invalid envmap normalization range: min({args.test.envmap_norm_min_scale}) > max({args.test.envmap_norm_max_scale}). '

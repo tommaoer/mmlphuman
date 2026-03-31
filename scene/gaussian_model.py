@@ -106,6 +106,8 @@ class GaussianModel:
         self.direct_envmap_single_sample = False
         self.relight_specular_scale = 1.0
         self.loaded_envmap_is_linear = True
+        self.relight_override_roughness = None
+        self.relight_override_specular = None
 
         # lbs weights
         self._weights = None
@@ -740,6 +742,10 @@ class GaussianModel:
         albedo = torch.clamp(albedo / denom, 0.0, 1.0)
         roughness = torch.clamp(roughness / denom, 0.0, 1.0)
         specular = torch.clamp(specular / denom, 0.0, 1.0)
+        if self.relight_override_roughness is not None:
+            roughness = torch.full_like(roughness, float(self.relight_override_roughness))
+        if self.relight_override_specular is not None:
+            specular = torch.full_like(specular, float(self.relight_override_specular))
 
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
         view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
