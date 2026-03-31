@@ -289,6 +289,7 @@ if __name__ == "__main__":
     parser.add_argument('--envmap_norm_max_scale', type=float, default=4.0)
     parser.add_argument('--use_envmap_direct', action='store_true')
     parser.add_argument('--use_gt_envmap', action='store_true')
+    parser.add_argument('--pure_gt_envmap', action='store_true')
     parser.add_argument('--match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_true')
     parser.add_argument('--no_match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_false')
     parser.set_defaults(envmap_auto_normalize=True)
@@ -310,6 +311,10 @@ if __name__ == "__main__":
     args.test.use_envmap_direct = pargs.use_envmap_direct
     args.test.use_gt_envmap = pargs.use_gt_envmap
     args.test.match_direct_envmap_energy = pargs.match_direct_envmap_energy
+    if pargs.pure_gt_envmap:
+        args.test.use_gt_envmap = True
+        args.test.use_envmap_direct = True
+        args.test.match_direct_envmap_energy = False
     if args.test.envmap_norm_min_scale > args.test.envmap_norm_max_scale:
         raise ValueError(
             f'Invalid envmap normalization range: min({args.test.envmap_norm_min_scale}) > max({args.test.envmap_norm_max_scale}). '
