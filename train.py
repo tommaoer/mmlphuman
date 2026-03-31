@@ -47,6 +47,22 @@ def training(args: Config):
     scene = Scene(args, gaussians)    
     gaussians.training_setup(args, scene.scene_scale)
 
+    if getattr(args, 'use_deferredgs', False) and getattr(args, 'train_envmap_path', None):
+        relight_cfg = gaussians.load_envmap_lighting(
+            args.train_envmap_path,
+            getattr(args, 'train_envmap_intensity', 1.0),
+            getattr(args, 'train_envmap_auto_normalize', True),
+            getattr(args, 'train_envmap_target_avg', 0.5),
+            getattr(args, 'train_envmap_norm_min_scale', 0.25),
+            getattr(args, 'train_envmap_norm_max_scale', 4.0),
+        )
+        print(f'Initialized training deferred light from envmap: {args.train_envmap_path}')
+        print({
+            'normalize_scale': relight_cfg.get('normalize_scale'),
+            'avg_before': relight_cfg.get('avg_before'),
+            'avg_after': relight_cfg.get('avg_after'),
+        })
+
     visualizer = Visualizer(in_training=True)
     visualizer.net_init(args.ip, args.port)
     visualizer.gaussians = gaussians
@@ -103,19 +119,13 @@ def training(args: Config):
         deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
         deferred_depth_normal_loss = torch.tensor(0.0, device=image.device)
         if getattr(args, 'use_deferredgs', False):
-            lambda_deferred_normal = getattr(args, 'lambda_deferred_normal', getattr(args, 'lambda_normal_smooth', 0.0))
-            lambda_deferred_albedo = getattr(args, 'lambda_deferred_albedo', getattr(args, 'lambda_albedo_rgb', 0.01))
-            lambda_deferred_normal_tv = getattr(args, 'lambda_deferred_normal_tv', getattr(args, 'lambda_normal_tv', 0.001))
-            lambda_deferred_rgb_tv = getattr(args, 'lambda_deferred_rgb_tv', getattr(args, 'lambda_rgb_tv', 0.0005))
-            lambda_deferred_depth_normal = getattr(args, 'lambda_deferred_depth_normal', getattr(args, 'lambda_depth_normal', getattr(args, 'lambda_normal_consistency', 0.01)))
-
-            deferred_normal_loss = normal_unit_loss(info['normal']) * lambda_deferred_normal
-            deferred_albedo_loss = l1_loss(info['albedo'], image_gt) * lambda_deferred_albedo
-            deferred_normal_tv_loss = image_tv_loss(info['normal'], mask=alpha) * lambda_deferred_normal_tv
-            deferred_rgb_tv_loss = image_tv_loss(image, mask=alpha) * lambda_deferred_rgb_tv
+            deferred_normal_loss = normal_unit_loss(info['normal']) * getattr(args, 'lambda_deferred_normal', 0.0)
+            deferred_albedo_loss = l1_loss(info['albedo'], image_gt) * getattr(args, 'lambda_deferred_albedo', 0.01)
+            deferred_normal_tv_loss = image_tv_loss(info['normal'], mask=alpha) * getattr(args, 'lambda_deferred_normal_tv', 0.005)
+            deferred_rgb_tv_loss = image_tv_loss(image, mask=alpha) * getattr(args, 'lambda_deferred_rgb_tv', 0.002)
             if 'depth' in info:
                 normal_from_depth = depth_to_normal(info['depth'].squeeze(-1), cam['K'])
-                deferred_depth_normal_loss = normal_cosine_loss(normal_from_depth, info['normal'], mask=alpha) * lambda_deferred_depth_normal
+                deferred_depth_normal_loss = normal_cosine_loss(normal_from_depth, info['normal'], mask=alpha) * getattr(args, 'lambda_deferred_depth_normal', 0.01)
 
         loss = (
             l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss
@@ -244,11 +254,30 @@ if __name__ == "__main__":
     parser.add_argument('--out_dir', type=str, default='')
     parser.add_argument('--ip', type=str, default='127.0.0.1')
     parser.add_argument('--port', type=int, default=23456)
+    parser.add_argument('--train_envmap_path', type=str, default=None)
+    parser.add_argument('--train_envmap_intensity', type=float, default=1.0)
+    parser.add_argument('--train_envmap_auto_normalize', dest='train_envmap_auto_normalize', action='store_true')
+    parser.add_argument('--no_train_envmap_auto_normalize', dest='train_envmap_auto_normalize', action='store_false')
+    parser.add_argument('--train_envmap_target_avg', type=float, default=0.5)
+    parser.add_argument('--train_envmap_norm_min_scale', type=float, default=0.25)
+    parser.add_argument('--train_envmap_norm_max_scale', type=float, default=4.0)
+    parser.set_defaults(train_envmap_auto_normalize=True)
     pargs = parser.parse_args(sys.argv[1:])
 
     args = OmegaConf.load(pargs.config)
     args.data_dir, args.out_dir = pargs.data_dir, pargs.out_dir
     args.ip, args.port = pargs.ip, pargs.port
+    args.train_envmap_path = pargs.train_envmap_path
+    args.train_envmap_intensity = pargs.train_envmap_intensity
+    args.train_envmap_auto_normalize = pargs.train_envmap_auto_normalize
+    args.train_envmap_target_avg = pargs.train_envmap_target_avg
+    args.train_envmap_norm_min_scale = pargs.train_envmap_norm_min_scale
+    args.train_envmap_norm_max_scale = pargs.train_envmap_norm_max_scale
+    if args.train_envmap_norm_min_scale > args.train_envmap_norm_max_scale:
+        raise ValueError(
+            f'Invalid train envmap normalization range: min({args.train_envmap_norm_min_scale}) > max({args.train_envmap_norm_max_scale}). '
+            'Did you mean to set --train_envmap_norm_max_scale?'
+        )
     os.makedirs(args.out_dir, exist_ok = True)
 
     OmegaConf.save(args, path.join(args.out_dir, 'config.yaml'))

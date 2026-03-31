@@ -89,8 +89,7 @@ class GaussianModel:
         self.deferred_light_sh = torch.empty(0)
         self.deferred_light_dc = torch.empty(0)
         self.use_direct_envmap = False
-        self.deferred_envmap = torch.empty(0)
-        self.force_diffuse_shading = False
+        self.deferred_envmap = None
 
         # lbs weights
         self._weights = None
@@ -662,6 +661,23 @@ class GaussianModel:
         n = torch.where(alpha > 1e-3, n, torch.zeros_like(n))
         return n
 
+    def _sample_envmap(self, normals):
+        if self.deferred_envmap is None:
+            return None
+        env = self.deferred_envmap
+        if env.device != normals.device:
+            env = env.to(normals.device)
+        dirs = F.normalize(normals, dim=-1)
+        x, y, z = dirs.unbind(dim=-1)
+        theta = torch.acos(torch.clamp(z, -1.0, 1.0))
+        phi = torch.atan2(y, x)
+        u = (phi / (2.0 * np.pi) + 0.5) % 1.0
+        v = torch.clamp(theta / np.pi, 0.0, 1.0)
+        grid = torch.stack([u * 2.0 - 1.0, v * 2.0 - 1.0], dim=-1)[None]
+        env_tex = env.permute(2, 0, 1)[None]
+        sampled = F.grid_sample(env_tex, grid, mode='bilinear', padding_mode='border', align_corners=False)
+        return sampled[0].permute(1, 2, 0)
+
     def render_deferred(self, cam, background=None, scaling_modifier=1.0):
         covars = self.get_covariance(scaling_modifier)
         zeros3 = torch.zeros(3, device=self.get_xyz.device, dtype=self.get_xyz.dtype)
@@ -683,22 +699,18 @@ class GaussianModel:
         roughness = torch.clamp(roughness / denom, 0.0, 1.0)
         specular = torch.clamp(specular / denom, 0.0, 1.0)
 
-        if bool(getattr(self, 'use_direct_envmap', False)) and torch.is_tensor(self.deferred_envmap) and self.deferred_envmap.numel() > 0:
+        if self.use_direct_envmap and self.deferred_envmap is not None:
             diffuse_light = self._sample_envmap(normal)
         else:
             sh_basis = self._eval_sh9(normal)
             diffuse_light = torch.einsum('hwc,ck->hwk', sh_basis, self.deferred_light_sh) + self.deferred_light_dc
-            diffuse_light = torch.clamp_min(diffuse_light, 0.0)
+        diffuse_light = torch.clamp_min(diffuse_light, 0.0)
 
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
         view_dir = F.normalize(cam_pos[None, None] - xyz_map, dim=-1)
         half_vec = F.normalize(view_dir + torch.tensor([0.0, 0.0, 1.0], device=view_dir.device), dim=-1)
-        if bool(getattr(self, 'force_diffuse_shading', False)):
-            spec_term = torch.zeros_like(alpha)
-            specular = torch.zeros_like(specular)
-        else:
-            spec_pow = 4.0 + (1.0 - roughness) * 60.0
-            spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
+        spec_pow = 4.0 + (1.0 - roughness) * 60.0
+        spec_term = torch.clamp((normal * half_vec).sum(dim=-1, keepdim=True), 0.0, 1.0) ** spec_pow
         shaded = albedo * diffuse_light + specular * spec_term
         if background is not None:
             shaded = shaded * alpha + background[None, None] * (1.0 - alpha)
@@ -714,21 +726,6 @@ class GaussianModel:
         }
         return torch.clamp(shaded, 0.0, 1.0), alpha, info
 
-    def _sample_envmap(self, normals):
-        env = self.deferred_envmap
-        if env.dim() != 3:
-            return torch.zeros_like(normals)
-        n = F.normalize(normals, dim=-1)
-        x, y, z = n.unbind(dim=-1)
-        theta = torch.arccos(torch.clamp(z, -1.0, 1.0))
-        phi = torch.atan2(y, x)
-        u = torch.remainder(phi / (2.0 * np.pi), 1.0)
-        v = theta / np.pi
-        grid = torch.stack([u * 2.0 - 1.0, v * 2.0 - 1.0], dim=-1)[None]
-        tex = env.permute(2, 0, 1)[None]
-        sampled = F.grid_sample(tex, grid, mode='bilinear', padding_mode='border', align_corners=False)
-        return sampled[0].permute(1, 2, 0)
-
     @torch.no_grad()
     def set_deferred_lighting(self, light_sh=None, light_dc=None):
         if light_sh is not None:
@@ -737,8 +734,6 @@ class GaussianModel:
         if light_dc is not None:
             light_dc = torch.as_tensor(light_dc, dtype=self.deferred_light_dc.dtype, device=self.deferred_light_dc.device)
             self.deferred_light_dc.copy_(light_dc.reshape_as(self.deferred_light_dc))
-        self.use_direct_envmap = False
-        self.deferred_envmap = torch.empty(0, device=self.deferred_light_sh.device, dtype=self.deferred_light_sh.dtype)
         self.cache_dict = {}
 
     @torch.no_grad()
@@ -751,25 +746,44 @@ class GaussianModel:
             light_sh=data.get('light_sh', None),
             light_dc=data.get('light_dc', None),
         )
-        self.use_direct_envmap = False
         return data
 
     @torch.no_grad()
-    def load_envmap_lighting(self, envmap_path, intensity=1.0, auto_rescale=True, target_avg=0.5):
+    def load_envmap_lighting(
+        self,
+        envmap_path,
+        intensity=1.0,
+        auto_normalize=True,
+        target_avg=0.5,
+        norm_min_scale=0.25,
+        norm_max_scale=4.0,
+        use_direct_envmap=False,
+    ):
         import imageio.v3 as iio
 
-        env = iio.imread(envmap_path).astype(np.float32)
-        if env.max() > 1.0:
-            env = env / 255.0
+        env = np.asarray(iio.imread(envmap_path))
+        if np.issubdtype(env.dtype, np.integer):
+            dtype_max = float(np.iinfo(env.dtype).max)
+            env = env.astype(np.float32) / max(dtype_max, 1.0)
+        else:
+            env = env.astype(np.float32)
+        env = np.nan_to_num(env, nan=0.0, posinf=0.0, neginf=0.0)
         env = np.clip(env[..., :3], 0.0, None)
-        applied_rescale = 1.0
-        if auto_rescale:
-            lum = 0.2126 * env[..., 0] + 0.7152 * env[..., 1] + 0.0722 * env[..., 2]
-            lum_mean = float(lum.mean())
-            if lum_mean > 1e-6:
-                applied_rescale = float(target_avg) / lum_mean
-                env = env * applied_rescale
+
+        if norm_min_scale > norm_max_scale:
+            norm_min_scale, norm_max_scale = norm_max_scale, norm_min_scale
+
+        luma = env[..., 0] * 0.2126 + env[..., 1] * 0.7152 + env[..., 2] * 0.0722
+        avg_before = float(luma.mean())
+        normalize_scale = 1.0
+        normalize_scale_unclamped = 1.0
+        if auto_normalize and target_avg > 0:
+            normalize_scale_unclamped = float(target_avg) / max(avg_before, 1e-6)
+            normalize_scale = float(np.clip(normalize_scale_unclamped, norm_min_scale, norm_max_scale))
+            env = env * normalize_scale
         env = env * float(intensity)
+        luma_after = env[..., 0] * 0.2126 + env[..., 1] * 0.7152 + env[..., 2] * 0.0722
+        avg_after = float(luma_after.mean())
         H, W = env.shape[:2]
 
         theta = (np.arange(H, dtype=np.float32) + 0.5) / H * np.pi
@@ -791,38 +805,42 @@ class GaussianModel:
 
         self._ensure_deferred_params()
         self.use_deferredgs = True
+        self.use_direct_envmap = bool(use_direct_envmap)
+        self.deferred_envmap = torch.as_tensor(env, dtype=torch.float32, device=self.deferred_light_sh.device)
         self.set_deferred_lighting(light_sh=coeff, light_dc=np.zeros(3, dtype=np.float32))
-        self.use_direct_envmap = True
-        self.deferred_envmap = torch.as_tensor(env, dtype=self.deferred_light_sh.dtype, device=self.deferred_light_sh.device)
         return dict(
             light_sh=coeff.tolist(),
             light_dc=[0.0, 0.0, 0.0],
             envmap_path=envmap_path,
             intensity=float(intensity),
-            auto_rescale=bool(auto_rescale),
-            rescale_factor=float(applied_rescale),
+            auto_normalize=bool(auto_normalize),
             target_avg=float(target_avg),
+            norm_min_scale=float(norm_min_scale),
+            norm_max_scale=float(norm_max_scale),
+            normalize_scale=float(normalize_scale),
+            normalize_scale_unclamped=float(normalize_scale_unclamped),
+            normalize_scale_was_clamped=bool(abs(normalize_scale - normalize_scale_unclamped) > 1e-6),
+            avg_before=float(avg_before),
+            avg_after=float(avg_after),
+            use_direct_envmap=bool(use_direct_envmap),
         )
 
     @torch.no_grad()
     def export_deferred_envmap(self, output_path, height=256, width=512):
-        if bool(getattr(self, 'use_direct_envmap', False)) and torch.is_tensor(self.deferred_envmap) and self.deferred_envmap.numel() > 0:
-            env = self.deferred_envmap.detach().cpu().numpy()
-        else:
-            theta = (np.arange(height, dtype=np.float32) + 0.5) / height * np.pi
-            phi = (np.arange(width, dtype=np.float32) + 0.5) / width * (2.0 * np.pi)
-            theta, phi = np.meshgrid(theta, phi, indexing='ij')
-            x = np.sin(theta) * np.cos(phi)
-            y = np.sin(theta) * np.sin(phi)
-            z = np.cos(theta)
+        theta = (np.arange(height, dtype=np.float32) + 0.5) / height * np.pi
+        phi = (np.arange(width, dtype=np.float32) + 0.5) / width * (2.0 * np.pi)
+        theta, phi = np.meshgrid(theta, phi, indexing='ij')
+        x = np.sin(theta) * np.cos(phi)
+        y = np.sin(theta) * np.sin(phi)
+        z = np.cos(theta)
 
-            basis = np.stack([
-                np.ones_like(x), y, z, x, x * y, y * z, 3.0 * z * z - 1.0, x * z, x * x - y * y
-            ], axis=-1)
-            light_sh = self.deferred_light_sh.detach().cpu().numpy()
-            light_dc = self.deferred_light_dc.detach().cpu().numpy()
-            env = np.einsum('hwc,ck->hwk', basis, light_sh) + light_dc[None, None]
-            env = np.clip(env, 0.0, None)
+        basis = np.stack([
+            np.ones_like(x), y, z, x, x * y, y * z, 3.0 * z * z - 1.0, x * z, x * x - y * y
+        ], axis=-1)
+        light_sh = self.deferred_light_sh.detach().cpu().numpy()
+        light_dc = self.deferred_light_dc.detach().cpu().numpy()
+        env = np.einsum('hwc,ck->hwk', basis, light_sh) + light_dc[None, None]
+        env = np.clip(env, 0.0, None)
 
         import imageio.v3 as iio
         iio.imwrite(output_path, np.clip(env * 255.0, 0, 255).astype(np.uint8))

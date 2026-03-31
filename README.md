@@ -85,6 +85,24 @@ python train.py --config ./config/{DATASET}.yaml --data_dir {DATASET_DIR} --out_
 ```
 It will take about 17 hours on a RTX 3090. We have not yet implemented the function to resume training from a checkpoint, so please be cautious during training.
 
+If you train with `use_deferredgs: true`, you can optionally initialize train-time deferred lighting from an envmap, and continue optimizing it during training:
+
+```shell
+python train.py \
+  --config ./config/{DATASET}.yaml \
+  --data_dir {DATASET_DIR} \
+  --out_dir {MODEL_DIR} \
+  --train_envmap_path {ENVMAP_FILE} \
+  --train_envmap_intensity 1.0 \
+  --train_envmap_auto_normalize \
+  --train_envmap_target_avg 0.5 \
+  --train_envmap_norm_min_scale 0.25 \
+  --train_envmap_norm_max_scale 4.0
+```
+
+- `--no_train_envmap_auto_normalize` can be used for raw HDR initialization without average-brightness normalization.
+- `--train_envmap_norm_min_scale` / `--train_envmap_norm_max_scale` clamp the normalization gain to avoid overly dark/bright initialization.
+
 ### Canonical-space deferredGS training
 
 This repo now includes an optional deferredGS-style branch for dynamic humans:
@@ -103,7 +121,25 @@ lambda_deferred_normal: 0.01
 
 The deferred branch keeps the original training pipeline intact, so setting `use_deferredgs: false` restores the original SH-color rendering path.
 
-### Post-training relighting with an environment map
+### Post-training relighting
+
+If the checkpoint was trained with `use_deferredgs: true`, you can relight it at test time by replacing the learned lighting with a new environment map:
+
+```shell
+python test.py \
+  --config ./config/{DATASET}.yaml \
+  --model_dir {MODEL_DIR} \
+  --out_dir {RELIGHT_OUT_DIR} \
+  --data_dir {DATASET_DIR} \
+  --envmap_path {ENVMAP_FILE} \
+  --envmap_intensity 1.0 \
+  --envmap_auto_normalize \
+  --envmap_target_avg 0.5 \
+  --envmap_norm_min_scale 0.25 \
+  --envmap_norm_max_scale 4.0 \
+  --use_envmap_direct \
+  --save_deferred_buffers
+```
 
 You can directly use an equirectangular environment map (`.hdr/.exr/.png/.jpg`) as relighting input:
 
@@ -115,17 +151,26 @@ python test.py \
   --data_dir {DATASET_DIR} \
   --envmap_path {ENVMAP_FILE} \
   --envmap_intensity 1.0 \
+  --envmap_auto_normalize \
   --envmap_target_avg 0.5 \
+  --envmap_norm_min_scale 0.25 \
+  --envmap_norm_max_scale 4.0 \
   --save_deferred_buffers
 ```
 
 The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
-By default, an auto-rescale step normalizes mean luminance to `envmap_target_avg`; disable it with `--disable_envmap_auto_rescale`.
-By default, relighting uses diffuse-only shading to avoid inherited specular artifacts from checkpoints; use `--enable_specular_relight` to enable specular again.
-If `--save_light_envmap` is set, the envmap actually used for rendering is exported as `optimized_light_envmap.png`.
+By default, rendering uses this SH-projected lighting; use `--use_envmap_direct` if you want to use the original envmap texture directly at test time.
 
+- `--envmap_auto_normalize` (default enabled): normalize envmap average luminance to `--envmap_target_avg` before applying intensity.
+- `--no_envmap_auto_normalize`: disable the normalization for raw HDR intensity comparison.
+- `--envmap_intensity`: final multiplicative scale after optional normalization.
+- `--envmap_norm_min_scale` / `--envmap_norm_max_scale`: clamp auto-normalization gain to avoid severe over/under exposure.
+  - Note: if you accidentally set `--envmap_norm_min_scale` twice (and forget `--envmap_norm_max_scale`), the second value overwrites min and can force over-bright results.
+- `--use_envmap_direct`: directly sample the loaded envmap for diffuse lighting at test time (higher-frequency than SH).
 - `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
   - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
+
+You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--envmap_path`.
 
 For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
 - albedo from the model's SH0 color term (instead of fixed gray),
