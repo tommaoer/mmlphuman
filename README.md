@@ -85,6 +85,21 @@ python train.py --config ./config/{DATASET}.yaml --data_dir {DATASET_DIR} --out_
 ```
 It will take about 17 hours on a RTX 3090. We have not yet implemented the function to resume training from a checkpoint, so please be cautious during training.
 
+If you train with `use_deferredgs: true`, you can optionally initialize train-time deferred lighting from an envmap, and continue optimizing it during training:
+
+```shell
+python train.py \
+  --config ./config/{DATASET}.yaml \
+  --data_dir {DATASET_DIR} \
+  --out_dir {MODEL_DIR} \
+  --train_envmap_path {ENVMAP_FILE} \
+  --train_envmap_intensity 1.0 \
+  --train_envmap_auto_normalize \
+  --train_envmap_target_avg 0.5
+```
+
+- `--no_train_envmap_auto_normalize` can be used for raw HDR initialization without average-brightness normalization.
+
 ### Canonical-space deferredGS training
 
 This repo now includes an optional deferredGS-style branch for dynamic humans:

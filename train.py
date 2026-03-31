@@ -47,6 +47,20 @@ def training(args: Config):
     scene = Scene(args, gaussians)    
     gaussians.training_setup(args, scene.scene_scale)
 
+    if getattr(args, 'use_deferredgs', False) and getattr(args, 'train_envmap_path', None):
+        relight_cfg = gaussians.load_envmap_lighting(
+            args.train_envmap_path,
+            getattr(args, 'train_envmap_intensity', 1.0),
+            getattr(args, 'train_envmap_auto_normalize', True),
+            getattr(args, 'train_envmap_target_avg', 0.5),
+        )
+        print(f'Initialized training deferred light from envmap: {args.train_envmap_path}')
+        print({
+            'normalize_scale': relight_cfg.get('normalize_scale'),
+            'avg_before': relight_cfg.get('avg_before'),
+            'avg_after': relight_cfg.get('avg_after'),
+        })
+
     visualizer = Visualizer(in_training=True)
     visualizer.net_init(args.ip, args.port)
     visualizer.gaussians = gaussians
@@ -238,11 +252,21 @@ if __name__ == "__main__":
     parser.add_argument('--out_dir', type=str, default='')
     parser.add_argument('--ip', type=str, default='127.0.0.1')
     parser.add_argument('--port', type=int, default=23456)
+    parser.add_argument('--train_envmap_path', type=str, default=None)
+    parser.add_argument('--train_envmap_intensity', type=float, default=1.0)
+    parser.add_argument('--train_envmap_auto_normalize', dest='train_envmap_auto_normalize', action='store_true')
+    parser.add_argument('--no_train_envmap_auto_normalize', dest='train_envmap_auto_normalize', action='store_false')
+    parser.add_argument('--train_envmap_target_avg', type=float, default=0.5)
+    parser.set_defaults(train_envmap_auto_normalize=True)
     pargs = parser.parse_args(sys.argv[1:])
 
     args = OmegaConf.load(pargs.config)
     args.data_dir, args.out_dir = pargs.data_dir, pargs.out_dir
     args.ip, args.port = pargs.ip, pargs.port
+    args.train_envmap_path = pargs.train_envmap_path
+    args.train_envmap_intensity = pargs.train_envmap_intensity
+    args.train_envmap_auto_normalize = pargs.train_envmap_auto_normalize
+    args.train_envmap_target_avg = pargs.train_envmap_target_avg
     os.makedirs(args.out_dir, exist_ok = True)
 
     OmegaConf.save(args, path.join(args.out_dir, 'config.yaml'))
