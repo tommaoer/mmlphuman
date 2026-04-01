@@ -85,6 +85,94 @@ python train.py --config ./config/{DATASET}.yaml --data_dir {DATASET_DIR} --out_
 ```
 It will take about 17 hours on a RTX 3090. We have not yet implemented the function to resume training from a checkpoint, so please be cautious during training.
 
+### Canonical-space deferredGS training
+
+This repo now includes an optional deferredGS-style branch for dynamic humans:
+
+- canonical-space Gaussian attributes are decomposed into geometry-driven canonical normals, albedo, roughness, and specular terms;
+- these canonical attributes are skinned into the posed target space with the same LBS transforms as the Gaussians;
+- supervision is still applied in the target/image space after deferred shading.
+
+To enable it, set the following in a config:
+
+```yaml
+use_deferredgs: true
+deferred_light_lr: 0.0005
+lambda_deferred_normal: 0.01
+lambda_normal_consistency: 0.02
+lambda_normal_smooth: 0.01
+lambda_normal_tv: 0.005
+lambda_rgb_tv: 0.001
+lambda_depth_normal: 0.02
+lambda_albedo_rgb: 0.02
+lambda_albedo_chroma: 0.03
+```
+
+For improving normal quality and albedo realism during deferred training:
+- `lambda_normal_consistency`: cosine consistency between learned and geometry normals.
+- `lambda_normal_smooth`: TV smoothness on geometry-normal map.
+- `lambda_normal_tv`: TV smoothness on rendered Gaussian normal map.
+- `lambda_rgb_tv`: weak TV regularization on final rendered RGB.
+- `lambda_depth_normal`: consistency between rendered normal and depth-derived normal.
+- `lambda_albedo_rgb`: weak RGB supervision for albedo on foreground.
+- `lambda_albedo_chroma`: chromaticity supervision to reduce illumination tint leakage in albedo.
+
+The deferred branch keeps the original training pipeline intact, so setting `use_deferredgs: false` restores the original SH-color rendering path.
+
+### Post-training relighting
+
+If the checkpoint was trained with `use_deferredgs: true`, you can relight it at test time by overriding the learned deferred lighting:
+
+```shell
+python test.py \
+  --config ./config/{DATASET}.yaml \
+  --model_dir {MODEL_DIR} \
+  --out_dir {RELIGHT_OUT_DIR} \
+  --data_dir {DATASET_DIR} \
+  --relight_json ./assets/relight_three_point.json \
+  --save_deferred_buffers
+```
+
+The relighting JSON contains:
+
+```json
+{
+  "light_dc": [0.55, 0.52, 0.50],
+  "light_sh": [[... 9 rows total ...]]
+}
+```
+
+- `light_dc`: RGB ambient/base light.
+- `light_sh`: 9 RGB spherical-harmonic coefficients used by the deferred branch.
+- `--save_deferred_buffers`: additionally exports `albedo/`, `normal/`, `roughness/`, `specular/`, and `alpha/` image buffers for inspection and manual look-dev.
+  - `normal/` is exported from geometry (position-map gradients) to avoid texture leakage in diagnostic normal maps.
+
+You can also combine relighting with novel-view / novel-pose rendering by passing `--cam_path` and `--pose_path` together with `--relight_json`.
+
+#### Relighting with an environment map (new)
+
+You can directly use an equirectangular environment map (`.hdr/.exr/.png/.jpg`) as relighting input:
+
+```shell
+python test.py \
+  --config ./config/{DATASET}.yaml \
+  --model_dir {MODEL_DIR} \
+  --out_dir {RELIGHT_OUT_DIR} \
+  --data_dir {DATASET_DIR} \
+  --envmap_path {ENVMAP_FILE} \
+  --envmap_intensity 1.0 \
+  --save_light_envmap {OUT_LIGHT_ENVMAP_PNG} \
+  --save_deferred_buffers
+```
+
+The script projects the environment map to 2nd-order SH (9 coefficients) and uses it as deferred lighting.
+`--save_light_envmap` exports the optimized/active SH lighting back to an equirectangular PNG for inspection.
+
+For legacy checkpoints (without deferred attributes), test-time relighting now initializes:
+- albedo from the model's SH0 color term (instead of fixed gray),
+- normal from local point-cloud PCA normals (instead of radial pseudo-normals),
+so exported albedo/normal buffers are more reasonable before any deferred finetuning.
+
 ## Visualization
 
 To visualize the results during training, open the viewer, set ip, port, and connect
@@ -135,4 +223,3 @@ This project uses [gsplat](https://github.com/nerfstudio-project/gsplat) rasteri
     year={2025}
 }
 ```
-

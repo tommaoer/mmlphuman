@@ -28,7 +28,7 @@ from scene.dataset import data_to_cam
 from scene.net_vis import Visualizer
 from utils.config_utils import Config
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, psnr, lpips_loss, dxyz_smooth_loss, gaussian_scaling_loss
+from utils.loss_utils import l1_loss, psnr, lpips_loss, dxyz_smooth_loss, gaussian_scaling_loss, normal_unit_loss, normal_cosine_loss, image_tv_loss, albedo_chromaticity_loss, depth_to_normal
 from utils.image_utils import crop_image
 
 def training(args: Config):
@@ -67,7 +67,10 @@ def training(args: Config):
         gaussians.smpl_poses = cam['pose']
         gaussians.Th, gaussians.Rh = cam['Th'], cam['Rh']
 
-        image, alpha, info = gaussians.render(cam, background=bg)
+        if getattr(args, 'use_deferredgs', False):
+            image, alpha, info = gaussians.render_deferred(cam, background=bg)
+        else:
+            image, alpha, info = gaussians.render(cam, background=bg)
         image = torch.clamp(image, 0, 1)
         image_gt, mask, mask_boundary = cam['image'], cam['mask'], cam['mask_boundary']
         image_gt[~mask] = bg
@@ -84,7 +87,27 @@ def training(args: Config):
 
         scaling_loss = args.lambda_scaling * gaussian_scaling_loss(gaussians.get_cano_scaling, args.scaling_threshold)
 
-        loss = l1loss + lpipsloss + dxyzsmoothloss + scaling_loss
+        deferred_normal_loss = torch.tensor(0.0, device=image.device)
+        deferred_normal_consistency_loss = torch.tensor(0.0, device=image.device)
+        deferred_normal_smooth_loss = torch.tensor(0.0, device=image.device)
+        deferred_normal_tv_loss = torch.tensor(0.0, device=image.device)
+        deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
+        deferred_depth_normal_loss = torch.tensor(0.0, device=image.device)
+        deferred_albedo_rgb_loss = torch.tensor(0.0, device=image.device)
+        deferred_albedo_chroma_loss = torch.tensor(0.0, device=image.device)
+        if getattr(args, 'use_deferredgs', False):
+            deferred_normal_loss = normal_unit_loss(info['normal']) * getattr(args, 'lambda_deferred_normal', 0.0)
+            n_geom = info.get('normal_geom', info['normal'])
+            deferred_normal_consistency_loss = normal_cosine_loss(info['normal'], n_geom, mask=mask) * getattr(args, 'lambda_normal_consistency', 0.02)
+            deferred_normal_smooth_loss = image_tv_loss(n_geom, mask=mask) * getattr(args, 'lambda_normal_smooth', 0.01)
+            deferred_normal_tv_loss = torch.tensor(0.0, device=image.device)
+            deferred_rgb_tv_loss = torch.tensor(0.0, device=image.device)
+            deferred_depth_normal_loss = torch.tensor(0.0, device=image.device)
+            deferred_albedo_rgb_loss = torch.tensor(0.0, device=image.device)
+            deferred_albedo_chroma_loss = torch.tensor(0.0, device=image.device)
+
+        loss = l1loss + lpipsloss + dxyzsmoothloss + scaling_loss + deferred_normal_loss + deferred_normal_consistency_loss + deferred_normal_smooth_loss + deferred_normal_tv_loss + deferred_rgb_tv_loss + deferred_depth_normal_loss + deferred_albedo_rgb_loss + deferred_albedo_chroma_loss
+        loss = torch.nan_to_num(loss, nan=0.0, posinf=1e3, neginf=1e3)
 
         loss.backward()
 
@@ -100,7 +123,20 @@ def training(args: Config):
             gaussians.sh_degree += 1
             print(f'SH degree: {gaussians.sh_degree}')
 
-        loss_dict = dict(l1_loss=l1loss, lpips_loss=lpipsloss, dxyzsmooth_loss=dxyzsmoothloss, scaling_loss=scaling_loss)
+        loss_dict = dict(
+            l1_loss=l1loss,
+            lpips_loss=lpipsloss,
+            dxyzsmooth_loss=dxyzsmoothloss,
+            scaling_loss=scaling_loss,
+            deferred_normal_loss=deferred_normal_loss,
+            deferred_normal_consistency_loss=deferred_normal_consistency_loss,
+            deferred_normal_smooth_loss=deferred_normal_smooth_loss,
+            deferred_normal_tv_loss=deferred_normal_tv_loss,
+            deferred_rgb_tv_loss=deferred_rgb_tv_loss,
+            deferred_depth_normal_loss=deferred_depth_normal_loss,
+            deferred_albedo_rgb_loss=deferred_albedo_rgb_loss,
+            deferred_albedo_chroma_loss=deferred_albedo_chroma_loss,
+        )
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
 
         # optimizer step
@@ -159,7 +195,10 @@ def training_report(scene: Scene, gaussians: GaussianModel, iteration, test_iter
             gaussians.smpl_poses = cam['pose']
             gaussians.Th, gaussians.Rh = cam['Th'], cam['Rh']
 
-            image, alpha, info = gaussians.render(cam, background=background)
+            if getattr(scene.gaussians, 'use_deferredgs', False):
+                image, alpha, info = gaussians.render_deferred(cam, background=background)
+            else:
+                image, alpha, info = gaussians.render(cam, background=background)
             image = torch.clamp(image, 0, 1)
             image_gt = cam['image']
             image_gt[~cam['mask']] = background
