@@ -35,6 +35,7 @@ def training(args: Config):
 
     gaussians = GaussianModel()
     scene = Scene(args, gaussians)    
+    gaussians.init_deferred(args)
     gaussians.training_setup(args, scene.scene_scale)
 
     visualizer = Visualizer(in_training=True)

@@ -16,6 +16,7 @@ from scene.mlp import MLP, vmap_mlp
 from utils.smpl_utils import smpl, interpolate_skinningfield, rigid_transform_tensor, rigid_transform_numba
 from utils.config_utils import Config
 from utils.sh_utils import RGB2SH
+from utils.envmap_utils import load_envmap_tensor, sample_latlong
 
 class GaussianModel:
 
@@ -42,7 +43,13 @@ class GaussianModel:
         self._opacity = torch.empty(0)
         self._sh0 = torch.empty(0)
         self._shN = torch.empty(0)
+        self._albedo = torch.empty(0)
+        self._roughness = torch.empty(0)
+        self._metallic = torch.empty(0)
         self.sh_degree = 0
+        self.use_deferred = False
+        self.optimize_envmap = False
+        self.envmap = None
 
         self.xyz_vt = torch.empty(0)
         self.xyz_ft = torch.empty(0)
@@ -110,7 +117,13 @@ class GaussianModel:
             '_opacity': self._opacity,
             '_sh0': self._sh0,
             '_shN': self._shN,
+            '_albedo': self._albedo,
+            '_roughness': self._roughness,
+            '_metallic': self._metallic,
             'sh_degree': self.sh_degree,
+            'use_deferred': self.use_deferred,
+            'optimize_envmap': self.optimize_envmap,
+            'envmap': self.envmap,
 
             '_weights': self.get_weights,
 
@@ -161,7 +174,13 @@ class GaussianModel:
         self._scaling = data['_scaling']
         self._sh0 = data['_sh0']
         self._shN = loader('_shN')
+        self._albedo = loader('_albedo')
+        self._roughness = loader('_roughness')
+        self._metallic = loader('_metallic')
         self.sh_degree = data['sh_degree']
+        self.use_deferred = bool(loader('use_deferred') if 'use_deferred' in data else False)
+        self.optimize_envmap = bool(loader('optimize_envmap') if 'optimize_envmap' in data else False)
+        self.envmap = loader('envmap')
 
         self._weights = data['_weights']
 
@@ -437,6 +456,69 @@ class GaussianModel:
 
         return color
 
+    def init_deferred(self, args: Config):
+        self.use_deferred = bool(getattr(args, 'use_deferred_rendering', False))
+        if not self.use_deferred:
+            return
+        if self._albedo is None or self._albedo.numel() == 0:
+            n = self._xyz.shape[0]
+            self._albedo = nn.Parameter(torch.full((n, 3), 0.5, device='cuda').requires_grad_(True))
+            self._roughness = nn.Parameter(torch.full((n, 1), 0.5, device='cuda').requires_grad_(True))
+            self._metallic = nn.Parameter(torch.full((n, 1), 0.0, device='cuda').requires_grad_(True))
+
+        self.optimize_envmap = bool(getattr(args, 'optimize_envmap', True))
+        envmap_path = getattr(args, 'envmap_path', None)
+        env_h = int(getattr(args, 'envmap_height', 32))
+        env_w = int(getattr(args, 'envmap_width', 64))
+
+        if envmap_path is not None and len(envmap_path) > 0:
+            env = load_envmap_tensor(envmap_path, device='cuda')
+        else:
+            env = torch.full((env_h, env_w, 3), 0.5, device='cuda')
+
+        self.envmap = nn.Parameter(env.requires_grad_(self.optimize_envmap))
+
+    def _quat_to_rot(self, quat):
+        quat = F.normalize(quat, dim=-1)
+        w, x, y, z = quat.unbind(dim=-1)
+        two = 2.0
+        rot = torch.stack([
+            1 - two * (y * y + z * z), two * (x * y - z * w), two * (x * z + y * w),
+            two * (x * y + z * w), 1 - two * (x * x + z * z), two * (y * z - x * w),
+            two * (x * z - y * w), two * (y * z + x * w), 1 - two * (x * x + y * y),
+        ], dim=-1)
+        return rot.reshape(-1, 3, 3)
+
+    def get_deferred_color(self, cam_pos):
+        if self.envmap is None:
+            return self.get_color(cam_pos)
+
+        scales = self.get_cano_scaling
+        axis_id = torch.argmin(scales, dim=-1)
+        local_n = F.one_hot(axis_id, num_classes=3).float()
+        rot = self._quat_to_rot(self.get_cano_rotation)
+        n_cano = torch.einsum('nij,nj->ni', rot, local_n)
+
+        pose_rot = self.get_Gweights[:, :3, :3]
+        n_world = torch.einsum('nij,nj->ni', pose_rot, n_cano)
+        if self.Rh is not None:
+            n_world = torch.einsum('ij,nj->ni', self.Rh, n_world)
+        n_world = F.normalize(n_world, dim=-1)
+
+        view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1)
+        reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1)
+
+        diffuse = sample_latlong(self.envmap, n_world)
+        spec_env = sample_latlong(self.envmap, reflect_dir)
+
+        albedo = torch.sigmoid(self._albedo)
+        roughness = torch.sigmoid(self._roughness)
+        metallic = torch.sigmoid(self._metallic)
+        spec_power = torch.clamp(1.0 - roughness, min=0.02, max=1.0)
+        specular = spec_env * spec_power * (0.04 * (1 - metallic) + metallic)
+        color = albedo * diffuse + specular
+        return torch.clamp(color, 0.0, 10.0)
+
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
         N = xyz.shape[0]
@@ -462,6 +544,9 @@ class GaussianModel:
         self._scaling = nn.Parameter(scale.requires_grad_(True))
         self._sh0 = nn.Parameter(sh0.requires_grad_(True))
         self._shN = nn.Parameter(shN.requires_grad_(True))
+        self._albedo = nn.Parameter(torch.full((N, 3), 0.5, device='cuda').requires_grad_(True))
+        self._roughness = nn.Parameter(torch.full((N, 1), 0.5, device='cuda').requires_grad_(True))
+        self._metallic = nn.Parameter(torch.full((N, 1), 0.0, device='cuda').requires_grad_(True))
 
         self.t_joints = torch.as_tensor(t_joints).detach().float().cpu()
         self.joint_parents = torch.as_tensor(joint_parents).detach().cpu()
@@ -530,6 +615,12 @@ class GaussianModel:
 
             'xyz_offset': Adam([self.xyz_offset], args.xyz_offset_lr, betas, eps),
         }
+        if self.use_deferred:
+            optimizers['albedo'] = Adam([self._albedo], args.color_lr, betas, eps)
+            optimizers['roughness'] = Adam([self._roughness], args.color_lr / 2, betas, eps)
+            optimizers['metallic'] = Adam([self._metallic], args.color_lr / 2, betas, eps)
+            if self.optimize_envmap and self.envmap is not None:
+                optimizers['envmap'] = Adam([self.envmap], args.envmap_lr, betas, eps)
 
         schedulers = [
             ExponentialLR(optimizers['dxyz'], gamma=0.01 ** (1.0 / args.iterations)),
@@ -544,6 +635,8 @@ class GaussianModel:
 
             ExponentialLR(optimizers['xyz_offset'], gamma=0.1 ** (1.0 / args.iterations)),
         ]
+        if self.use_deferred and self.optimize_envmap and self.envmap is not None:
+            schedulers.append(ExponentialLR(optimizers['envmap'], gamma=0.2 ** (1.0 / args.iterations)))
 
         self.optimizers = optimizers
         self.schedulers = schedulers
@@ -562,7 +655,7 @@ class GaussianModel:
         covars = self.get_covariance(scaling_modifier)
         if override_color is None:
             cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3,3]
-            override_color = self.get_color(cam_pos)
+            override_color = self.get_deferred_color(cam_pos) if self.use_deferred else self.get_color(cam_pos)
         
         image, alpha, info = rasterization(
             means=self.get_xyz,

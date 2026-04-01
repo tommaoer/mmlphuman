@@ -121,6 +121,19 @@ To test the rendering speed, run:
 python test.py --config ./config/{DATASET}.yaml --model_dir {MODEL_DIR} --cam_path {CAM_FILE} --pose_path {POSE_FILE} --test_speed [--test] 
 ```
 
+### Deferred rendering & envmap relighting
+
+You can enable canonical-space deferred relighting with environment maps (`.hdr`, `.png`) by adding these options to config:
+```yaml
+use_deferred_rendering: true
+optimize_envmap: true
+envmap_path: /path/to/your/envmap.hdr   # optional
+envmap_height: 32
+envmap_width: 64
+envmap_lr: 0.001
+```
+During training, the model optimizes per-Gaussian material factors (`albedo/roughness/metallic`) together with the optional envmap, while deformation and multi-view dynamic supervision remain unchanged.
+
 Evaluation example codes are provided in `script/eval.ipynb`
 
 ## Acknowledgement
@@ -135,4 +148,3 @@ This project uses [gsplat](https://github.com/nerfstudio-project/gsplat) rasteri
     year={2025}
 }
 ```
-

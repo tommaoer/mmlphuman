@@ -47,6 +47,12 @@ class Config:
     encoder_lr = 0.0005
 
     iteration_sh_degree = 250000
+    use_deferred_rendering = False
+    optimize_envmap = True
+    envmap_path = None
+    envmap_height = 32
+    envmap_width = 64
+    envmap_lr = 0.001
 
     # loss
     lambda_lpips = 0.1

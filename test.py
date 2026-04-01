@@ -174,6 +174,7 @@ def testing(args: Config):
     init_smpl_pose()
 
     gaussians = load_model(args.model_dir)
+    gaussians.init_deferred(args)
     gaussians.is_test = args.test.is_test
     gaussians.prepare_test()
     background = torch.as_tensor(np.array(args.background)).float().cuda()
