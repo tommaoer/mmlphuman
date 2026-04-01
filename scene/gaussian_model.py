@@ -758,14 +758,20 @@ class GaussianModel:
         self.xyz_vt = xyz_vt
         self.xyz_ft = xyz_ft
 
+        def _safe_knn_weights(dists):
+            dist_sqrt = torch.sqrt(torch.clamp_min(dists[0], 1e-12))
+            invdist = 1.0 / dist_sqrt
+            invdist_sum = torch.clamp_min(torch.sum(invdist, dim=-1, keepdim=True), 1e-12)
+            weights = invdist / invdist_sum
+            return invdist, weights
+
         dists, idxs, _ = knn_points(
             p1=self._xyz[None],
             p2=xyz_vt[None],
             K=3,
         )
         nbr_gs = idxs[0]
-        nbr_gs_invdist = 1 / torch.sqrt(dists[0])
-        nbr_gs_wght = nbr_gs_invdist / torch.sum(nbr_gs_invdist, dim=-1, keepdim=True)
+        nbr_gs_invdist, nbr_gs_wght = _safe_knn_weights(dists)
 
         _, idxs, _ = knn_points(
             p1=xyz_vt[None],
@@ -784,8 +790,7 @@ class GaussianModel:
             K=3,
         )
         nbr_gs = idxs[0]
-        nbr_gs_invdist = 1 / torch.sqrt(dists[0])
-        nbr_gs_wght = nbr_gs_invdist / torch.sum(nbr_gs_invdist, dim=-1, keepdim=True)
+        nbr_gs_invdist, nbr_gs_wght = _safe_knn_weights(dists)
         self.nbr_gsft = nbr_gs
         self.nbr_gsft_wght = nbr_gs_wght
 
@@ -795,7 +800,6 @@ class GaussianModel:
             K=3,
         )
         nbr_gs = idxs[0]
-        nbr_gs_invdist = 1 / torch.sqrt(dists[0])
-        nbr_gs_wght = nbr_gs_invdist / torch.sum(nbr_gs_invdist, dim=-1, keepdim=True)
+        nbr_gs_invdist, nbr_gs_wght = _safe_knn_weights(dists)
         self.nbr_vtft = nbr_gs
         self.nbr_vtft_wght = nbr_gs_wght
