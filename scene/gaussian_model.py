@@ -518,10 +518,10 @@ class GaussianModel:
         n_world = torch.einsum('nij,nj->ni', pose_rot, n_cano)
         if self.Rh is not None:
             n_world = torch.einsum('ij,nj->ni', self.Rh, n_world)
-        n_world = F.normalize(n_world, dim=-1)
+        n_world = F.normalize(n_world, dim=-1, eps=1e-6)
 
-        view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1)
-        reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1)
+        view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1, eps=1e-6)
+        reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1, eps=1e-6)
 
         envmap = self.get_envmap_linear()
         diffuse = sample_latlong(envmap, n_world)
@@ -535,10 +535,10 @@ class GaussianModel:
         color = albedo * diffuse + specular
         normal = (n_world + 1.0) * 0.5
         return dict(
-            color=torch.nan_to_num(torch.clamp(color, 0.0, 10.0)),
+            color=torch.clamp(color, 0.0, 10.0),
             albedo=torch.clamp(albedo, 0.0, 1.0),
-            diffuse=torch.nan_to_num(torch.clamp(diffuse, 0.0, 10.0)),
-            specular=torch.nan_to_num(torch.clamp(specular, 0.0, 10.0)),
+            diffuse=torch.clamp(diffuse, 0.0, 10.0),
+            specular=torch.clamp(specular, 0.0, 10.0),
             normal=torch.clamp(normal, 0.0, 1.0),
         )
 
@@ -710,7 +710,7 @@ class GaussianModel:
             backgrounds=background[None],  # [1, 3]
             covars=covars,
         )
-        return torch.nan_to_num(image[0]), torch.nan_to_num(alpha[0]), info
+        return image[0], alpha[0], info
 
     def render_deferred_buffers(self, cam, scaling_modifier=1.0, background=None):
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3,3]
