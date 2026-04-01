@@ -347,6 +347,7 @@ class GaussianModel:
         N_feat = len(self.encoder_feat_params['layers.0.weight'])
         features = features.tile([N_feat, 1])
         features = vmap_mlp(self.encoder_feat_params, features)
+        features = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
 
         self.cache_dict['get_encoded_feature'] = features
         return features
@@ -356,6 +357,7 @@ class GaussianModel:
         if 'get_encoded_feature_gsparam_weight' in self.cache_dict: return self.cache_dict['get_encoded_feature_gsparam_weight']
         features = self.get_encoded_feature[...,:self.num_basis]
         features = torch.einsum('nrc,nr->nc', features[self.nbr_gsft], self.nbr_gsft_wght)
+        features = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
 
         self.cache_dict['get_encoded_feature_gsparam_weight'] = features
         return features
@@ -367,10 +369,13 @@ class GaussianModel:
 
         features = self.get_encoded_feature[...,self.num_basis:]
         features = torch.einsum('nrc,nr->nc', features[self.nbr_vtft], self.nbr_vtft_wght)
+        features = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
 
-        dxyz_vt = torch.einsum('vc,vcl->vl', features, self.dxyz_bs)
+        dxyz_bs = torch.nan_to_num(self.dxyz_bs, nan=0.0, posinf=0.0, neginf=0.0)
+        dxyz_vt = torch.einsum('vc,vcl->vl', features, dxyz_bs)
 
         dxyz_vt = self.dxyz_vt + dxyz_vt
+        dxyz_vt = torch.nan_to_num(dxyz_vt, nan=0.0, posinf=0.0, neginf=0.0)
         self.cache_dict['get_dxyz_vt'] = dxyz_vt
 
         return dxyz_vt
@@ -379,7 +384,8 @@ class GaussianModel:
     def get_dxyz(self):
         if 'get_dxyz' in self.cache_dict: return self.cache_dict['get_dxyz']
 
-        dxyz = torch.sum(self.nbr_gs_invdist[...,None] * self.get_dxyz_vt[self.nbr_gs], dim=1) / torch.sum(self.nbr_gs_invdist, dim=-1)[...,None]
+        dxyz = torch.sum(self.nbr_gs_invdist[...,None] * self.get_dxyz_vt[self.nbr_gs], dim=1) / torch.clamp_min(torch.sum(self.nbr_gs_invdist, dim=-1)[...,None], 1e-12)
+        dxyz = torch.nan_to_num(dxyz, nan=0.0, posinf=0.0, neginf=0.0)
         self.cache_dict['get_dxyz'] = dxyz
         return dxyz
     
