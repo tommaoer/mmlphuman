@@ -132,7 +132,7 @@ envmap_height: 32
 envmap_width: 64
 envmap_lr: 0.001
 ```
-During training, the model optimizes per-Gaussian material factors (`albedo/roughness/specular`) together with an envmap initialized from scratch (no input envmap required), while deformation and multi-view dynamic supervision remain unchanged. At test time, you can either load a custom envmap via `envmap_path` or use the optimized envmap from checkpoint.
+During training, the model optimizes per-Gaussian material factors (`albedo/roughness/specular`) together with an envmap initialized from white light (no input envmap required), while deformation and multi-view dynamic supervision remain unchanged. The default material initialization is `specular=0`, `roughness=1`. At test time, you can either load a custom envmap via `envmap_path` or use the optimized envmap from checkpoint.
 `test.py` will also export `envmap_preview.png` (linear->sRGB) and deferred component renders (`albedo/`, `diffuse/`, `specular/`, `normal/`) when deferred rendering is enabled.
 
 Evaluation example codes are provided in `script/eval.ipynb`

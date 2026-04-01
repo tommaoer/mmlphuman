@@ -463,8 +463,8 @@ class GaussianModel:
         if self._albedo is None or self._albedo.numel() == 0:
             n = self._xyz.shape[0]
             self._albedo = nn.Parameter(torch.full((n, 3), 0.5, device='cuda').requires_grad_(True))
-            self._roughness = nn.Parameter(torch.full((n, 1), 0.5, device='cuda').requires_grad_(True))
-            self._specular = nn.Parameter(torch.full((n, 1), 0.2, device='cuda').requires_grad_(True))
+            self._roughness = nn.Parameter(torch.full((n, 1), 1.0, device='cuda').requires_grad_(True))
+            self._specular = nn.Parameter(torch.full((n, 1), 0.0, device='cuda').requires_grad_(True))
 
         is_train = mode == 'train'
         self.optimize_envmap = True if is_train else False
@@ -473,9 +473,7 @@ class GaussianModel:
         env_w = int(getattr(args, 'envmap_width', 64))
 
         if is_train:
-            env = torch.full((env_h, env_w, 3), 0.5, device='cuda')
-            env = env + 0.05 * torch.randn_like(env)
-            env = torch.clamp(env, 0.0, 1.0)
+            env = torch.ones((env_h, env_w, 3), device='cuda')
             self.envmap = nn.Parameter(env.requires_grad_(True))
             return
 
@@ -487,7 +485,7 @@ class GaussianModel:
         if self.envmap is not None and self.envmap.numel() > 0:
             self.envmap = nn.Parameter(self.envmap.detach().requires_grad_(False))
         else:
-            env = torch.full((env_h, env_w, 3), 0.5, device='cuda')
+            env = torch.ones((env_h, env_w, 3), device='cuda')
             self.envmap = nn.Parameter(env.requires_grad_(False))
 
     def _quat_to_rot(self, quat):
@@ -524,10 +522,10 @@ class GaussianModel:
         diffuse = sample_latlong(self.envmap, n_world)
         spec_env = sample_latlong(self.envmap, reflect_dir)
 
-        albedo = torch.sigmoid(self._albedo)
-        roughness = torch.sigmoid(self._roughness)
+        albedo = torch.clamp(self._albedo, 0.0, 1.0)
+        roughness = torch.clamp(self._roughness, 0.0, 1.0)
         spec_power = torch.clamp(1.0 - roughness, min=0.02, max=1.0)
-        specular_strength = torch.sigmoid(self._specular)
+        specular_strength = torch.clamp(self._specular, 0.0, 1.0)
         specular = spec_env * spec_power * specular_strength
         color = albedo * diffuse + specular
         normal = (n_world + 1.0) * 0.5
@@ -574,8 +572,8 @@ class GaussianModel:
         self._sh0 = nn.Parameter(sh0.requires_grad_(True))
         self._shN = nn.Parameter(shN.requires_grad_(True))
         self._albedo = nn.Parameter(torch.full((N, 3), 0.5, device='cuda').requires_grad_(True))
-        self._roughness = nn.Parameter(torch.full((N, 1), 0.5, device='cuda').requires_grad_(True))
-        self._specular = nn.Parameter(torch.full((N, 1), 0.2, device='cuda').requires_grad_(True))
+        self._roughness = nn.Parameter(torch.full((N, 1), 1.0, device='cuda').requires_grad_(True))
+        self._specular = nn.Parameter(torch.full((N, 1), 0.0, device='cuda').requires_grad_(True))
 
         self.t_joints = torch.as_tensor(t_joints).detach().float().cpu()
         self.joint_parents = torch.as_tensor(joint_parents).detach().cpu()
