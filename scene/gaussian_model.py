@@ -477,7 +477,7 @@ class GaussianModel:
         env_w = int(getattr(args, 'envmap_width', 64))
 
         if is_train:
-            env = torch.full((env_h, env_w, 3), float(self._to_logit(torch.tensor(0.99))), device='cuda')
+            env = torch.ones((env_h, env_w, 3), device='cuda')
             self.envmap = nn.Parameter(env.requires_grad_(True))
             return
 
@@ -518,14 +518,13 @@ class GaussianModel:
         n_world = torch.einsum('nij,nj->ni', pose_rot, n_cano)
         if self.Rh is not None:
             n_world = torch.einsum('ij,nj->ni', self.Rh, n_world)
-        n_world = F.normalize(n_world, dim=-1, eps=1e-6)
+        n_world = F.normalize(n_world, dim=-1)
 
-        view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1, eps=1e-6)
-        reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1, eps=1e-6)
+        view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1)
+        reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1)
 
-        envmap = self.get_envmap_linear()
-        diffuse = sample_latlong(envmap, n_world)
-        spec_env = sample_latlong(envmap, reflect_dir)
+        diffuse = sample_latlong(self.envmap, n_world)
+        spec_env = sample_latlong(self.envmap, reflect_dir)
 
         albedo = torch.sigmoid(self._albedo)
         roughness = torch.sigmoid(self._roughness)
@@ -549,14 +548,7 @@ class GaussianModel:
     def save_envmap_visualization(self, save_path):
         if self.envmap is None:
             return
-        save_envmap_png(self.get_envmap_linear(), save_path)
-
-    def get_envmap_linear(self):
-        if self.envmap is None:
-            return None
-        if self.optimize_envmap:
-            return torch.sigmoid(self.envmap)
-        return torch.clamp(self.envmap, min=0.0)
+        save_envmap_png(self.envmap, save_path)
 
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
