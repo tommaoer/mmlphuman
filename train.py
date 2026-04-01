@@ -19,6 +19,7 @@ import numpy as np
 import random
 import pickle
 import copy
+import lpips
 from argparse import ArgumentParser
 from torch.utils.data import DataLoader
 
@@ -28,8 +29,10 @@ from scene.dataset import data_to_cam
 from scene.net_vis import Visualizer
 from utils.config_utils import Config
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, psnr, lpips_loss, dxyz_smooth_loss, gaussian_scaling_loss
+from utils.loss_utils import l1_loss, psnr, dxyz_smooth_loss, gaussian_scaling_loss
 from utils.image_utils import crop_image
+
+loss_fn_vgg = lpips.LPIPS(net='vgg').cuda()
 
 def training(args: Config):
 
@@ -87,8 +90,11 @@ def training(args: Config):
 
         random_patch_flag = False if iteration < args.iteration_lpips_random_patch else True
         image_crop, image_gt_crop = crop_image(bg, mask, 512, random_patch_flag, image.permute(2,0,1), image_gt.permute(2,0,1))
-        if iteration > args.iteration_lpips: lpipsloss = lpips_loss(image_crop.permute(1,2,0), image_gt_crop.permute(1,2,0)) * args.lambda_lpips
-        else: lpipsloss = torch.tensor(0) 
+        if iteration > args.iteration_lpips:
+            pred = image_crop[None] * 2.0 - 1.0
+            gt = image_gt_crop[None] * 2.0 - 1.0
+            lpipsloss = loss_fn_vgg(pred, gt).mean() * args.lambda_lpips
+        else: lpipsloss = torch.tensor(0.0, device=image.device) 
 
         scaling_loss = args.lambda_scaling * gaussian_scaling_loss(gaussians.get_cano_scaling, args.scaling_threshold)
 
