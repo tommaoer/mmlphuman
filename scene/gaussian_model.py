@@ -365,7 +365,10 @@ class GaussianModel:
     @property
     def get_dxyz_vt(self):
         if 'get_dxyz_vt' in self.cache_dict: return self.cache_dict['get_dxyz_vt']
-        if not self.is_dxyz_bs: return self.dxyz_vt
+        if not self.is_dxyz_bs:
+            dxyz_vt = torch.nan_to_num(self.dxyz_vt, nan=0.0, posinf=0.0, neginf=0.0)
+            self.cache_dict['get_dxyz_vt'] = dxyz_vt
+            return dxyz_vt
 
         features = self.get_encoded_feature[...,self.num_basis:]
         features = torch.einsum('nrc,nr->nc', features[self.nbr_vtft], self.nbr_vtft_wght)
