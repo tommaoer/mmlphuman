@@ -23,6 +23,19 @@ from utils.config_utils import Config
 from utils.image_utils import encode_bytes
 from utils.smpl_utils import init_smpl_pose
 
+def _rgb_to_srgb(f: torch.Tensor) -> torch.Tensor:
+    return torch.where(
+        f <= 0.0031308,
+        f * 12.92,
+        torch.pow(torch.clamp(f, min=0.0031308), 1.0 / 2.4) * 1.055 - 0.055,
+    )
+
+def _to_png_uint8(image: torch.Tensor, output_srgb: bool = True):
+    image = torch.clamp(image, min=0.0, max=1.0)
+    if output_srgb:
+        image = _rgb_to_srgb(image)
+    return (torch.clamp(image, min=0.0, max=1.0) * 255).byte().contiguous().cpu().numpy()
+
 def render_frame(gaussians: GaussianModel, cam, background):
     if getattr(gaussians, 'use_deferredgs', False):
         return gaussians.render_deferred(cam, background=background)
@@ -154,7 +167,7 @@ def testing_novel_cam_pose_speed(gaussians: GaussianModel, out_dir, frame_ids, p
     print('Running time:', run_time)
     print('FPS:', fps)
 
-def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_list, cam, background, save_buffers=False):
+def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_list, cam, background, save_buffers=False, output_srgb=True, debug_material_stats=False):
 
     os.makedirs(path.join(out_dir), exist_ok=True)
     for frame_id in tqdm(frame_ids):
@@ -165,14 +178,21 @@ def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_li
         gaussians.Th = torch.clone(torch.as_tensor(pose['Th']).cpu())
         gaussians.Rh = torch.as_tensor(pose['Rh']).cpu()
         image, alpha, info = render_frame(gaussians, cam, background)
+        if debug_material_stats and getattr(gaussians, 'use_deferredgs', False):
+            print(
+                f"[material] frame={frame_id} "
+                f"roughness(min/mean/max)=({info['roughness'].min().item():.4f}/{info['roughness'].mean().item():.4f}/{info['roughness'].max().item():.4f}) "
+                f"specular(min/mean/max)=({info['specular'].min().item():.4f}/{info['specular'].mean().item():.4f}/{info['specular'].max().item():.4f})"
+            )
+            debug_material_stats = False
 
-        image = (torch.clamp(image, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
+        image = _to_png_uint8(image, output_srgb=output_srgb)
         iio.imwrite(path.join(out_dir, f'{frame_id:08d}.png'), image)
         if save_buffers and getattr(gaussians, 'use_deferredgs', False):
             save_deferred_buffers(info, out_dir, frame_id)
 
 
-def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save_buffers=False):
+def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save_buffers=False, output_srgb=True, debug_material_stats=False):
     test_dataloader = DataLoader(
         dataset=dataset,
         batch_size=1,
@@ -184,6 +204,7 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save
     for k in ['gt', 'result', 'mask']:
         os.makedirs(path.join(out_dir, k), exist_ok=True)
 
+    written = 0
     for cam in tqdm(test_dataloader):
         cam = data_to_cam(cam, non_blocking=False)
         frame_id = cam['frame_id']
@@ -191,19 +212,32 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save
         gaussians.Th, gaussians.Rh = cam['Th'], cam['Rh']
 
         image, alpha, info = render_frame(gaussians, cam, background)
+        if debug_material_stats and getattr(gaussians, 'use_deferredgs', False):
+            print(
+                f"[material] frame={frame_id} "
+                f"roughness(min/mean/max)=({info['roughness'].min().item():.4f}/{info['roughness'].mean().item():.4f}/{info['roughness'].max().item():.4f}) "
+                f"specular(min/mean/max)=({info['specular'].min().item():.4f}/{info['specular'].mean().item():.4f}/{info['specular'].max().item():.4f})"
+            )
+            debug_material_stats = False
 
-        image = (torch.clamp(image, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
+        image = _to_png_uint8(image, output_srgb=output_srgb)
 
         image_gt = cam['image']
         image_gt[~cam['mask']] = background
-        image_gt = (image_gt * 255).byte().contiguous().cpu().numpy()
+        image_gt = _to_png_uint8(image_gt, output_srgb=output_srgb)
         mask = cam['mask'].byte().contiguous().cpu().numpy() * 255
 
         iio.imwrite(path.join(out_dir, f'gt/{frame_id:08d}.png'), image_gt)
         iio.imwrite(path.join(out_dir, f'result/{frame_id:08d}.png'), image)
         iio.imwrite(path.join(out_dir, f'mask/{frame_id:08d}.png'), mask)
+        written += 1
         if save_buffers and getattr(gaussians, 'use_deferredgs', False):
             save_deferred_buffers(info, out_dir, frame_id)
+    if written == 0:
+        raise RuntimeError(
+            'No frames were rendered. Please check test frame range/camera IDs in config '
+            '(test.begin_ith_frame, test.num_frame, test.frame_interval, test.cam_ids) and dataset coverage.'
+        )
 
 
 @torch.no_grad()
@@ -215,21 +249,39 @@ def testing(args: Config):
     gaussians = load_model(args.model_dir)
     gaussians.is_test = args.test.is_test
     gaussians.prepare_test()
+    gaussians.match_direct_envmap_energy = getattr(args.test, 'match_direct_envmap_energy', True)
+    gaussians.use_geom_normal_for_lighting = getattr(args.test, 'use_geom_normal_for_lighting', False)
+    gaussians.flip_normal_towards_camera = getattr(args.test, 'flip_normal_towards_camera', False)
+    gaussians.convert_lighting_normal_to_world = getattr(args.test, 'convert_lighting_normal_to_world', True)
+    gaussians.direct_envmap_single_sample = getattr(args.test, 'direct_envmap_single_sample', False)
+    gaussians.relight_specular_scale = getattr(args.test, 'relight_specular_scale', 1.0)
+    gaussians.relight_override_roughness = getattr(args.test, 'relight_override_roughness', None)
+    gaussians.relight_override_specular = getattr(args.test, 'relight_override_specular', None)
+    gaussians.lighting_normal_smooth_steps = getattr(args.test, 'lighting_normal_smooth_steps', 0)
     background = torch.as_tensor(np.array(args.background)).float().cuda()
     if args.test.envmap_path is not None:
-        gaussians.force_diffuse_shading = not getattr(args.test, 'enable_specular_relight', False)
         relight_cfg = gaussians.load_envmap_lighting(
             args.test.envmap_path,
             args.test.envmap_intensity,
-            auto_rescale=(not getattr(args.test, 'disable_envmap_auto_rescale', False)),
-            target_avg=getattr(args.test, 'envmap_target_avg', 0.5),
+            getattr(args.test, 'envmap_auto_normalize', True),
+            getattr(args.test, 'envmap_target_avg', 0.5),
+            getattr(args.test, 'envmap_norm_min_scale', 0.25),
+            getattr(args.test, 'envmap_norm_max_scale', 4.0),
+            bool(getattr(args.test, 'use_envmap_direct', False) or getattr(args.test, 'use_gt_envmap', False)),
+            getattr(args.test, 'envmap_debug_print', False),
         )
         print(f'Loaded envmap relighting: {args.test.envmap_path}')
         print(json.dumps(relight_cfg, indent=2)[:1000])
     if getattr(args.test, 'save_light_envmap', False):
-        envmap_path = path.join(args.out_dir, 'optimized_light_envmap.png')
-        gaussians.export_deferred_envmap(envmap_path)
-        print(f'Saved optimized light envmap to: {envmap_path}')
+        envmap_sh_path = path.join(args.out_dir, 'optimized_light_envmap_sh.png')
+        gaussians.export_deferred_envmap(envmap_sh_path)
+        print(f'Saved SH-projected light envmap to: {envmap_sh_path}')
+        if args.test.envmap_path is not None:
+            envmap_gt_preview_path = path.join(args.out_dir, 'input_envmap_used_preview.png')
+            envmap_gt_raw_path = path.join(args.out_dir, 'input_envmap_used_raw.npy')
+            gaussians.export_loaded_envmap(envmap_gt_preview_path, raw_output_path=envmap_gt_raw_path)
+            print(f'Saved loaded envmap preview to: {envmap_gt_preview_path}')
+            print(f'Saved loaded envmap raw HDR values to: {envmap_gt_raw_path}')
 
     # Dataset
     test_frame_ids = np.arange(args.test.begin_ith_frame, args.test.begin_ith_frame+args.test.frame_interval*args.test.num_frame, args.test.frame_interval).tolist()
@@ -250,7 +302,12 @@ def testing(args: Config):
         if args.test.test_speed:
             testing_novel_cam_pose_speed(gaussians, args.out_dir, test_frame_ids, pose_list, cam, background)
         else:
-            testing_novel_cam_pose(gaussians, args.out_dir, test_frame_ids, pose_list, cam, background, save_buffers=args.test.save_deferred_buffers)
+            testing_novel_cam_pose(
+                gaussians, args.out_dir, test_frame_ids, pose_list, cam, background,
+                save_buffers=args.test.save_deferred_buffers,
+                output_srgb=getattr(args.test, 'output_srgb', True),
+                debug_material_stats=getattr(args.test, 'debug_material_stats', False),
+            )
     else:
         DatasetType = get_dataset_type(args.data_dir)
         testset = DatasetType(
@@ -260,8 +317,17 @@ def testing(args: Config):
             background=np.array(args.background),
             image_scaling=args.image_scaling,
         )
+        print(
+            f'Test selection: frames[{test_frame_ids[0]}..{test_frame_ids[-1]}], '
+            f'num_frames={len(test_frame_ids)}, cam_ids={test_cam_ids}, matched_samples={len(testset)}'
+        )
 
-        testing_dataset(gaussians, args.out_dir, testset, background, save_buffers=args.test.save_deferred_buffers)
+        testing_dataset(
+            gaussians, args.out_dir, testset, background,
+            save_buffers=args.test.save_deferred_buffers,
+            output_srgb=getattr(args.test, 'output_srgb', True),
+            debug_material_stats=getattr(args.test, 'debug_material_stats', False),
+        )
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Testing")
@@ -275,9 +341,33 @@ if __name__ == "__main__":
     parser.add_argument('--pose_path', type=str, default=None)
     parser.add_argument('--envmap_path', type=str, default=None)
     parser.add_argument('--envmap_intensity', type=float, default=1.0)
-    parser.add_argument('--disable_envmap_auto_rescale', action='store_true')
+    parser.add_argument('--envmap_auto_normalize', dest='envmap_auto_normalize', action='store_true')
+    parser.add_argument('--no_envmap_auto_normalize', dest='envmap_auto_normalize', action='store_false')
     parser.add_argument('--envmap_target_avg', type=float, default=0.5)
-    parser.add_argument('--enable_specular_relight', action='store_true')
+    parser.add_argument('--envmap_norm_min_scale', type=float, default=0.25)
+    parser.add_argument('--envmap_norm_max_scale', type=float, default=4.0)
+    parser.add_argument('--use_envmap_direct', action='store_true')
+    parser.add_argument('--use_gt_envmap', action='store_true')
+    parser.add_argument('--pure_gt_envmap', action='store_true')
+    parser.add_argument('--envmap_debug_print', action='store_true')
+    parser.add_argument('--match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_true')
+    parser.add_argument('--no_match_direct_envmap_energy', dest='match_direct_envmap_energy', action='store_false')
+    parser.add_argument('--output_srgb', dest='output_srgb', action='store_true')
+    parser.add_argument('--output_linear', dest='output_srgb', action='store_false')
+    parser.add_argument('--use_geom_normal_for_lighting', action='store_true')
+    parser.add_argument('--flip_normal_towards_camera', action='store_true')
+    parser.add_argument('--convert_lighting_normal_to_world', dest='convert_lighting_normal_to_world', action='store_true')
+    parser.add_argument('--no_convert_lighting_normal_to_world', dest='convert_lighting_normal_to_world', action='store_false')
+    parser.add_argument('--direct_envmap_single_sample', action='store_true')
+    parser.add_argument('--relight_specular_scale', type=float, default=1.0)
+    parser.add_argument('--relight_override_roughness', type=float, default=None)
+    parser.add_argument('--relight_override_specular', type=float, default=None)
+    parser.add_argument('--lighting_normal_smooth_steps', type=int, default=0)
+    parser.add_argument('--debug_material_stats', action='store_true')
+    parser.set_defaults(envmap_auto_normalize=True)
+    parser.set_defaults(match_direct_envmap_energy=True)
+    parser.set_defaults(output_srgb=True)
+    parser.set_defaults(convert_lighting_normal_to_world=True)
     parser.add_argument('--save_light_envmap', action='store_true')
     parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
@@ -288,9 +378,37 @@ if __name__ == "__main__":
     args.data_dir, args.out_dir, args.model_dir, args.test.cam_path, args.test.pose_path = pargs.data_dir, pargs.out_dir, pargs.model_dir, pargs.cam_path, pargs.pose_path
     args.test.envmap_path = pargs.envmap_path
     args.test.envmap_intensity = pargs.envmap_intensity
-    args.test.disable_envmap_auto_rescale = pargs.disable_envmap_auto_rescale
+    args.test.envmap_auto_normalize = pargs.envmap_auto_normalize
     args.test.envmap_target_avg = pargs.envmap_target_avg
-    args.test.enable_specular_relight = pargs.enable_specular_relight
+    args.test.envmap_norm_min_scale = pargs.envmap_norm_min_scale
+    args.test.envmap_norm_max_scale = pargs.envmap_norm_max_scale
+    args.test.use_envmap_direct = pargs.use_envmap_direct
+    args.test.use_gt_envmap = pargs.use_gt_envmap
+    args.test.match_direct_envmap_energy = pargs.match_direct_envmap_energy
+    args.test.envmap_debug_print = pargs.envmap_debug_print
+    args.test.output_srgb = pargs.output_srgb
+    args.test.use_geom_normal_for_lighting = pargs.use_geom_normal_for_lighting
+    args.test.flip_normal_towards_camera = pargs.flip_normal_towards_camera
+    args.test.convert_lighting_normal_to_world = pargs.convert_lighting_normal_to_world
+    args.test.direct_envmap_single_sample = pargs.direct_envmap_single_sample
+    args.test.relight_specular_scale = pargs.relight_specular_scale
+    args.test.relight_override_roughness = pargs.relight_override_roughness
+    args.test.relight_override_specular = pargs.relight_override_specular
+    args.test.lighting_normal_smooth_steps = pargs.lighting_normal_smooth_steps
+    args.test.debug_material_stats = pargs.debug_material_stats
+    if pargs.pure_gt_envmap:
+        args.test.use_gt_envmap = True
+        args.test.use_envmap_direct = True
+        print(
+            "[pure_gt_envmap] Enabled GT envmap relighting only "
+            "(equivalent to --use_gt_envmap --use_envmap_direct). "
+            "No extra material/normal overrides are forced."
+        )
+    if args.test.envmap_norm_min_scale > args.test.envmap_norm_max_scale:
+        raise ValueError(
+            f'Invalid envmap normalization range: min({args.test.envmap_norm_min_scale}) > max({args.test.envmap_norm_max_scale}). '
+            'Did you mean to set --envmap_norm_max_scale?'
+        )
     args.test.save_light_envmap = pargs.save_light_envmap
     args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed
