@@ -72,7 +72,7 @@ def training(args: Config):
         gaussians.Th, gaussians.Rh = cam['Th'], cam['Rh']
 
         image, alpha, info = gaussians.render(cam, background=bg)
-        image = torch.clamp(image, 0, 1)
+        image = torch.nan_to_num(torch.clamp(image, 0, 1))
         image_gt, mask, mask_boundary = cam['image'], cam['mask'], cam['mask_boundary']
         image_gt[~mask] = bg
         image_gt[mask_boundary] = bg
@@ -82,7 +82,7 @@ def training(args: Config):
         if gaussians.use_deferred and args.lambda_albedo_rgb > 0:
             albedo_color = torch.sigmoid(gaussians._albedo)
             albedo_image, _, _ = gaussians.render(cam, override_color=albedo_color, background=bg)
-            albedo_image = torch.clamp(albedo_image, 0, 1)
+            albedo_image = torch.nan_to_num(torch.clamp(albedo_image, 0, 1))
             albedo_rgb_loss = l1_loss(albedo_image, image_gt) * args.lambda_albedo_rgb
         else:
             albedo_rgb_loss = torch.tensor(0.0, device=image.device)
@@ -93,6 +93,8 @@ def training(args: Config):
         if iteration > args.iteration_lpips:
             pred = image_crop[None] * 2.0 - 1.0
             gt = image_gt_crop[None] * 2.0 - 1.0
+            pred = torch.nan_to_num(pred)
+            gt = torch.nan_to_num(gt)
             lpipsloss = loss_fn_vgg(pred, gt).mean() * args.lambda_lpips
         else: lpipsloss = torch.tensor(0.0, device=image.device) 
 

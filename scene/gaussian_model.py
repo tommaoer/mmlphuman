@@ -477,7 +477,7 @@ class GaussianModel:
         env_w = int(getattr(args, 'envmap_width', 64))
 
         if is_train:
-            env = torch.ones((env_h, env_w, 3), device='cuda')
+            env = torch.full((env_h, env_w, 3), float(self._to_logit(torch.tensor(0.99))), device='cuda')
             self.envmap = nn.Parameter(env.requires_grad_(True))
             return
 
@@ -523,8 +523,9 @@ class GaussianModel:
         view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1)
         reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1)
 
-        diffuse = sample_latlong(self.envmap, n_world)
-        spec_env = sample_latlong(self.envmap, reflect_dir)
+        envmap = self.get_envmap_linear()
+        diffuse = sample_latlong(envmap, n_world)
+        spec_env = sample_latlong(envmap, reflect_dir)
 
         albedo = torch.sigmoid(self._albedo)
         roughness = torch.sigmoid(self._roughness)
@@ -534,10 +535,10 @@ class GaussianModel:
         color = albedo * diffuse + specular
         normal = (n_world + 1.0) * 0.5
         return dict(
-            color=torch.clamp(color, 0.0, 10.0),
+            color=torch.nan_to_num(torch.clamp(color, 0.0, 10.0)),
             albedo=torch.clamp(albedo, 0.0, 1.0),
-            diffuse=torch.clamp(diffuse, 0.0, 10.0),
-            specular=torch.clamp(specular, 0.0, 10.0),
+            diffuse=torch.nan_to_num(torch.clamp(diffuse, 0.0, 10.0)),
+            specular=torch.nan_to_num(torch.clamp(specular, 0.0, 10.0)),
             normal=torch.clamp(normal, 0.0, 1.0),
         )
 
@@ -548,7 +549,14 @@ class GaussianModel:
     def save_envmap_visualization(self, save_path):
         if self.envmap is None:
             return
-        save_envmap_png(self.envmap, save_path)
+        save_envmap_png(self.get_envmap_linear(), save_path)
+
+    def get_envmap_linear(self):
+        if self.envmap is None:
+            return None
+        if self.optimize_envmap:
+            return torch.sigmoid(self.envmap)
+        return torch.clamp(self.envmap, min=0.0)
 
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
@@ -702,7 +710,7 @@ class GaussianModel:
             backgrounds=background[None],  # [1, 3]
             covars=covars,
         )
-        return image[0], alpha[0], info
+        return torch.nan_to_num(image[0]), torch.nan_to_num(alpha[0]), info
 
     def render_deferred_buffers(self, cam, scaling_modifier=1.0, background=None):
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3,3]
