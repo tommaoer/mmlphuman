@@ -399,16 +399,11 @@ if __name__ == "__main__":
     if pargs.pure_gt_envmap:
         args.test.use_gt_envmap = True
         args.test.use_envmap_direct = True
-        args.test.match_direct_envmap_energy = False
-        args.test.direct_envmap_single_sample = False
-        args.test.use_geom_normal_for_lighting = True
-        args.test.relight_specular_scale = 0.0
-        if args.test.relight_override_roughness is None:
-            args.test.relight_override_roughness = 1.0
-        if args.test.relight_override_specular is None:
-            args.test.relight_override_specular = 0.0
-        if args.test.lighting_normal_smooth_steps == 0:
-            args.test.lighting_normal_smooth_steps = 2
+        print(
+            "[pure_gt_envmap] Enabled GT envmap relighting only "
+            "(equivalent to --use_gt_envmap --use_envmap_direct). "
+            "No extra material/normal overrides are forced."
+        )
     if args.test.envmap_norm_min_scale > args.test.envmap_norm_max_scale:
         raise ValueError(
             f'Invalid envmap normalization range: min({args.test.envmap_norm_min_scale}) > max({args.test.envmap_norm_max_scale}). '

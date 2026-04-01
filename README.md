@@ -170,7 +170,7 @@ By default, rendering uses this SH-projected lighting; use `--use_gt_envmap` (or
   - Note: if you accidentally set `--envmap_norm_min_scale` twice (and forget `--envmap_norm_max_scale`), the second value overwrites min and can force over-bright results.
 - `--use_gt_envmap`: use the loaded envmap directly for test-time relighting instead of SH approximation.
 - `--use_envmap_direct`: use a higher-frequency envmap diffuse approximation (multi-direction envmap sampling) at test time.
-- `--pure_gt_envmap`: force pure GT-envmap relighting path (`use_gt_envmap` + diffuse direct-envmap sampling + disable SH energy matching), and defaults to dielectric material overrides (`roughness=1.0`, `specular=0.0`) and geometry normals for lighting unless explicitly overridden.
+- `--pure_gt_envmap`: force GT-envmap relighting path (`use_gt_envmap` + `use_envmap_direct`) without additional material/normal overrides.
 - `--relight_specular_scale`: scale specular term during relighting (default `1.0`, set `0.0` to remove metallic-like highlights).
 - `--relight_override_roughness`: force a fixed roughness value during relighting (e.g. `1.0`).
 - `--relight_override_specular`: force a fixed specular value during relighting (e.g. `0.0`).
