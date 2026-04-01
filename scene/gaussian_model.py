@@ -16,6 +16,7 @@ from scene.mlp import MLP, vmap_mlp
 from utils.smpl_utils import smpl, interpolate_skinningfield, rigid_transform_tensor, rigid_transform_numba
 from utils.config_utils import Config
 from utils.sh_utils import RGB2SH
+from utils.envmap_utils import load_envmap_tensor, sample_latlong, save_envmap_png
 
 class GaussianModel:
 
@@ -32,6 +33,10 @@ class GaussianModel:
         self.color_activation = torch.sigmoid
         self.inverse_color_activation = torch.logit
 
+    def _to_logit(self, x, eps=1e-4):
+        x = torch.clamp(x, eps, 1 - eps)
+        return torch.logit(x)
+
     def __init__(self):
 
         self._xyz = torch.empty(0)
@@ -42,7 +47,13 @@ class GaussianModel:
         self._opacity = torch.empty(0)
         self._sh0 = torch.empty(0)
         self._shN = torch.empty(0)
+        self._albedo = torch.empty(0)
+        self._roughness = torch.empty(0)
+        self._specular = torch.empty(0)
         self.sh_degree = 0
+        self.use_deferred = False
+        self.optimize_envmap = False
+        self.envmap = None
 
         self.xyz_vt = torch.empty(0)
         self.xyz_ft = torch.empty(0)
@@ -110,7 +121,13 @@ class GaussianModel:
             '_opacity': self._opacity,
             '_sh0': self._sh0,
             '_shN': self._shN,
+            '_albedo': self._albedo,
+            '_roughness': self._roughness,
+            '_specular': self._specular,
             'sh_degree': self.sh_degree,
+            'use_deferred': self.use_deferred,
+            'optimize_envmap': self.optimize_envmap,
+            'envmap': self.envmap,
 
             '_weights': self.get_weights,
 
@@ -161,7 +178,13 @@ class GaussianModel:
         self._scaling = data['_scaling']
         self._sh0 = data['_sh0']
         self._shN = loader('_shN')
+        self._albedo = loader('_albedo')
+        self._roughness = loader('_roughness')
+        self._specular = loader('_specular') if '_specular' in data else loader('_metallic')
         self.sh_degree = data['sh_degree']
+        self.use_deferred = bool(loader('use_deferred') if 'use_deferred' in data else False)
+        self.optimize_envmap = bool(loader('optimize_envmap') if 'optimize_envmap' in data else False)
+        self.envmap = loader('envmap')
 
         self._weights = data['_weights']
 
@@ -437,6 +460,104 @@ class GaussianModel:
 
         return color
 
+    def init_deferred(self, args: Config, mode='train'):
+        self.use_deferred = bool(getattr(args, 'use_deferred_rendering', False))
+        if not self.use_deferred:
+            return
+        if self._albedo is None or self._albedo.numel() == 0:
+            n = self._xyz.shape[0]
+            self._albedo = nn.Parameter(torch.full((n, 3), float(self._to_logit(torch.tensor(0.5))), device='cuda').requires_grad_(True))
+            self._roughness = nn.Parameter(torch.full((n, 1), float(self._to_logit(torch.tensor(0.95))), device='cuda').requires_grad_(True))
+            self._specular = nn.Parameter(torch.full((n, 1), float(self._to_logit(torch.tensor(0.05))), device='cuda').requires_grad_(True))
+
+        is_train = mode == 'train'
+        self.optimize_envmap = True if is_train else False
+        envmap_path = getattr(args, 'envmap_path', None)
+        env_h = int(getattr(args, 'envmap_height', 32))
+        env_w = int(getattr(args, 'envmap_width', 64))
+
+        if is_train:
+            env = torch.full((env_h, env_w, 3), float(self._to_logit(torch.tensor(0.99))), device='cuda')
+            self.envmap = nn.Parameter(env.requires_grad_(True))
+            return
+
+        if envmap_path is not None and len(envmap_path) > 0:
+            env = load_envmap_tensor(envmap_path, device='cuda')
+            self.envmap = nn.Parameter(env.requires_grad_(False))
+            return
+
+        if self.envmap is not None and self.envmap.numel() > 0:
+            self.envmap = nn.Parameter(self.envmap.detach().requires_grad_(False))
+        else:
+            env = torch.ones((env_h, env_w, 3), device='cuda')
+            self.envmap = nn.Parameter(env.requires_grad_(False))
+
+    def _quat_to_rot(self, quat):
+        quat = F.normalize(quat, dim=-1)
+        w, x, y, z = quat.unbind(dim=-1)
+        two = 2.0
+        rot = torch.stack([
+            1 - two * (y * y + z * z), two * (x * y - z * w), two * (x * z + y * w),
+            two * (x * y + z * w), 1 - two * (x * x + z * z), two * (y * z - x * w),
+            two * (x * z - y * w), two * (y * z + x * w), 1 - two * (x * x + y * y),
+        ], dim=-1)
+        return rot.reshape(-1, 3, 3)
+
+    def get_deferred_components(self, cam_pos):
+        if self.envmap is None:
+            color = self.get_color(cam_pos)
+            return dict(color=color, albedo=color, diffuse=color, specular=torch.zeros_like(color), normal=torch.zeros_like(color))
+
+        scales = self.get_cano_scaling
+        axis_id = torch.argmin(scales, dim=-1)
+        local_n = F.one_hot(axis_id, num_classes=3).float()
+        rot = self._quat_to_rot(self.get_cano_rotation)
+        n_cano = torch.einsum('nij,nj->ni', rot, local_n)
+
+        pose_rot = self.get_Gweights[:, :3, :3]
+        n_world = torch.einsum('nij,nj->ni', pose_rot, n_cano)
+        if self.Rh is not None:
+            n_world = torch.einsum('ij,nj->ni', self.Rh, n_world)
+        n_world = F.normalize(n_world, dim=-1, eps=1e-6)
+
+        view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1, eps=1e-6)
+        reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1, eps=1e-6)
+
+        envmap = self.get_envmap_linear()
+        diffuse = sample_latlong(envmap, n_world)
+        spec_env = sample_latlong(envmap, reflect_dir)
+
+        albedo = torch.sigmoid(self._albedo)
+        roughness = torch.sigmoid(self._roughness)
+        spec_power = torch.clamp(1.0 - roughness, min=0.02, max=1.0)
+        specular_strength = torch.sigmoid(self._specular)
+        specular = spec_env * spec_power * specular_strength
+        color = albedo * diffuse + specular
+        normal = (n_world + 1.0) * 0.5
+        return dict(
+            color=torch.clamp(color, 0.0, 10.0),
+            albedo=torch.clamp(albedo, 0.0, 1.0),
+            diffuse=torch.clamp(diffuse, 0.0, 10.0),
+            specular=torch.clamp(specular, 0.0, 10.0),
+            normal=torch.clamp(normal, 0.0, 1.0),
+        )
+
+    def get_deferred_color(self, cam_pos):
+        return self.get_deferred_components(cam_pos)['color']
+
+    @torch.no_grad()
+    def save_envmap_visualization(self, save_path):
+        if self.envmap is None:
+            return
+        save_envmap_png(self.get_envmap_linear(), save_path)
+
+    def get_envmap_linear(self):
+        if self.envmap is None:
+            return None
+        if self.optimize_envmap:
+            return torch.sigmoid(self.envmap)
+        return torch.clamp(self.envmap, min=0.0)
+
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
         N = xyz.shape[0]
@@ -462,6 +583,9 @@ class GaussianModel:
         self._scaling = nn.Parameter(scale.requires_grad_(True))
         self._sh0 = nn.Parameter(sh0.requires_grad_(True))
         self._shN = nn.Parameter(shN.requires_grad_(True))
+        self._albedo = nn.Parameter(torch.full((N, 3), float(self._to_logit(torch.tensor(0.5))), device='cuda').requires_grad_(True))
+        self._roughness = nn.Parameter(torch.full((N, 1), float(self._to_logit(torch.tensor(0.95))), device='cuda').requires_grad_(True))
+        self._specular = nn.Parameter(torch.full((N, 1), float(self._to_logit(torch.tensor(0.05))), device='cuda').requires_grad_(True))
 
         self.t_joints = torch.as_tensor(t_joints).detach().float().cpu()
         self.joint_parents = torch.as_tensor(joint_parents).detach().cpu()
@@ -530,6 +654,12 @@ class GaussianModel:
 
             'xyz_offset': Adam([self.xyz_offset], args.xyz_offset_lr, betas, eps),
         }
+        if self.use_deferred:
+            optimizers['albedo'] = Adam([self._albedo], args.color_lr, betas, eps)
+            optimizers['roughness'] = Adam([self._roughness], args.color_lr / 2, betas, eps)
+            optimizers['specular'] = Adam([self._specular], args.color_lr / 2, betas, eps)
+            if self.optimize_envmap and self.envmap is not None:
+                optimizers['envmap'] = Adam([self.envmap], args.envmap_lr, betas, eps)
 
         schedulers = [
             ExponentialLR(optimizers['dxyz'], gamma=0.01 ** (1.0 / args.iterations)),
@@ -544,6 +674,8 @@ class GaussianModel:
 
             ExponentialLR(optimizers['xyz_offset'], gamma=0.1 ** (1.0 / args.iterations)),
         ]
+        if self.use_deferred and self.optimize_envmap and self.envmap is not None:
+            schedulers.append(ExponentialLR(optimizers['envmap'], gamma=0.2 ** (1.0 / args.iterations)))
 
         self.optimizers = optimizers
         self.schedulers = schedulers
@@ -558,11 +690,10 @@ class GaussianModel:
         self.cache_dict = {}
 
     def render(self, cam, override_color=None, scaling_modifier=1.0, background=None):
-        sh = self.get_sh      # can be faster
         covars = self.get_covariance(scaling_modifier)
         if override_color is None:
             cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3,3]
-            override_color = self.get_color(cam_pos)
+            override_color = self.get_deferred_color(cam_pos) if self.use_deferred else self.get_color(cam_pos)
         
         image, alpha, info = rasterization(
             means=self.get_xyz,
@@ -580,6 +711,15 @@ class GaussianModel:
             covars=covars,
         )
         return image[0], alpha[0], info
+
+    def render_deferred_buffers(self, cam, scaling_modifier=1.0, background=None):
+        cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3,3]
+        comp = self.get_deferred_components(cam_pos)
+        renders = {}
+        for name in ['albedo', 'diffuse', 'specular', 'normal']:
+            image, _, _ = self.render(cam, override_color=comp[name], scaling_modifier=scaling_modifier, background=background)
+            renders[name] = image
+        return renders
 
     def init_body(self):
         # Rots = batch_rodrigues(smpl.smpl_bigpose.reshape(-1,3)).cuda()

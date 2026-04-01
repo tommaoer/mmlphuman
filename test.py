@@ -124,6 +124,9 @@ def testing_novel_cam_pose_speed(gaussians: GaussianModel, out_dir, frame_ids, p
 def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_list, cam, background):
 
     os.makedirs(path.join(out_dir), exist_ok=True)
+    if gaussians.use_deferred:
+        for k in ['albedo', 'diffuse', 'specular', 'normal']:
+            os.makedirs(path.join(out_dir, k), exist_ok=True)
     for frame_id in tqdm(frame_ids):
         pose = pose_list[frame_id]
         pose = copy.deepcopy(pose)
@@ -132,9 +135,13 @@ def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_li
         gaussians.Th = torch.clone(torch.as_tensor(pose['Th']).cpu())
         gaussians.Rh = torch.as_tensor(pose['Rh']).cpu()
         image, alpha, info = gaussians.render(cam, background=background)
+        comp_images = gaussians.render_deferred_buffers(cam, background=background) if gaussians.use_deferred else {}
 
         image = (torch.clamp(image, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
         iio.imwrite(path.join(out_dir, f'{frame_id:08d}.png'), image)
+        for name, cimg in comp_images.items():
+            cimg = (torch.clamp(cimg, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
+            iio.imwrite(path.join(out_dir, name, f'{frame_id:08d}.png'), cimg)
 
 
 def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background):
@@ -148,6 +155,9 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background):
 
     for k in ['gt', 'result', 'mask']:
         os.makedirs(path.join(out_dir, k), exist_ok=True)
+    if gaussians.use_deferred:
+        for k in ['albedo', 'diffuse', 'specular', 'normal']:
+            os.makedirs(path.join(out_dir, k), exist_ok=True)
 
     for cam in tqdm(test_dataloader):
         cam = data_to_cam(cam, non_blocking=False)
@@ -156,6 +166,7 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background):
         gaussians.Th, gaussians.Rh = cam['Th'], cam['Rh']
 
         image, alpha, info = gaussians.render(cam, background=background)
+        comp_images = gaussians.render_deferred_buffers(cam, background=background) if gaussians.use_deferred else {}
 
         image = (torch.clamp(image, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
 
@@ -167,13 +178,20 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background):
         iio.imwrite(path.join(out_dir, f'gt/{frame_id:08d}.png'), image_gt)
         iio.imwrite(path.join(out_dir, f'result/{frame_id:08d}.png'), image)
         iio.imwrite(path.join(out_dir, f'mask/{frame_id:08d}.png'), mask)
+        for name, cimg in comp_images.items():
+            cimg = (torch.clamp(cimg, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
+            iio.imwrite(path.join(out_dir, f'{name}/{frame_id:08d}.png'), cimg)
 
 
 @torch.no_grad()
 def testing(args: Config):
     init_smpl_pose()
+    os.makedirs(args.out_dir, exist_ok=True)
 
     gaussians = load_model(args.model_dir)
+    gaussians.init_deferred(args, mode='test')
+    if gaussians.use_deferred:
+        gaussians.save_envmap_visualization(path.join(args.out_dir, 'envmap_preview.png'))
     gaussians.is_test = args.test.is_test
     gaussians.prepare_test()
     background = torch.as_tensor(np.array(args.background)).float().cuda()
