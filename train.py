@@ -76,6 +76,13 @@ def training(args: Config):
         image[mask_boundary] = bg
 
         l1loss = l1_loss(image, image_gt)
+        if gaussians.use_deferred and args.lambda_albedo_rgb > 0:
+            albedo_color = torch.sigmoid(gaussians._albedo)
+            albedo_image, _, _ = gaussians.render(cam, override_color=albedo_color, background=bg)
+            albedo_image = torch.clamp(albedo_image, 0, 1)
+            albedo_rgb_loss = l1_loss(albedo_image, image_gt) * args.lambda_albedo_rgb
+        else:
+            albedo_rgb_loss = torch.tensor(0.0, device=image.device)
         dxyzsmoothloss = dxyz_smooth_loss(gaussians) * args.lambda_dxyz_smooth
 
         random_patch_flag = False if iteration < args.iteration_lpips_random_patch else True
@@ -85,7 +92,7 @@ def training(args: Config):
 
         scaling_loss = args.lambda_scaling * gaussian_scaling_loss(gaussians.get_cano_scaling, args.scaling_threshold)
 
-        loss = l1loss + lpipsloss + dxyzsmoothloss + scaling_loss
+        loss = l1loss + albedo_rgb_loss + lpipsloss + dxyzsmoothloss + scaling_loss
 
         loss.backward()
 
@@ -101,7 +108,7 @@ def training(args: Config):
             gaussians.sh_degree += 1
             print(f'SH degree: {gaussians.sh_degree}')
 
-        loss_dict = dict(l1_loss=l1loss, lpips_loss=lpipsloss, dxyzsmooth_loss=dxyzsmoothloss, scaling_loss=scaling_loss)
+        loss_dict = dict(l1_loss=l1loss, albedo_rgb_loss=albedo_rgb_loss, lpips_loss=lpipsloss, dxyzsmooth_loss=dxyzsmoothloss, scaling_loss=scaling_loss)
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
         if gaussians.use_deferred and iteration in args.test_iterations:
             gaussians.save_envmap_visualization(path.join(args.out_dir, f'envmap_{iteration:08d}.png'))
