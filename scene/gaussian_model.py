@@ -456,7 +456,7 @@ class GaussianModel:
 
         return color
 
-    def init_deferred(self, args: Config):
+    def init_deferred(self, args: Config, mode='train'):
         self.use_deferred = bool(getattr(args, 'use_deferred_rendering', False))
         if not self.use_deferred:
             return
@@ -466,17 +466,29 @@ class GaussianModel:
             self._roughness = nn.Parameter(torch.full((n, 1), 0.5, device='cuda').requires_grad_(True))
             self._specular = nn.Parameter(torch.full((n, 1), 0.2, device='cuda').requires_grad_(True))
 
-        self.optimize_envmap = True
+        is_train = mode == 'train'
+        self.optimize_envmap = True if is_train else False
         envmap_path = getattr(args, 'envmap_path', None)
         env_h = int(getattr(args, 'envmap_height', 32))
         env_w = int(getattr(args, 'envmap_width', 64))
 
+        if is_train:
+            env = torch.full((env_h, env_w, 3), 0.5, device='cuda')
+            env = env + 0.05 * torch.randn_like(env)
+            env = torch.clamp(env, 0.0, 1.0)
+            self.envmap = nn.Parameter(env.requires_grad_(True))
+            return
+
         if envmap_path is not None and len(envmap_path) > 0:
             env = load_envmap_tensor(envmap_path, device='cuda')
+            self.envmap = nn.Parameter(env.requires_grad_(False))
+            return
+
+        if self.envmap is not None and self.envmap.numel() > 0:
+            self.envmap = nn.Parameter(self.envmap.detach().requires_grad_(False))
         else:
             env = torch.full((env_h, env_w, 3), 0.5, device='cuda')
-
-        self.envmap = nn.Parameter(env.requires_grad_(self.optimize_envmap))
+            self.envmap = nn.Parameter(env.requires_grad_(False))
 
     def _quat_to_rot(self, quat):
         quat = F.normalize(quat, dim=-1)

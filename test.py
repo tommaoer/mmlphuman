@@ -189,7 +189,7 @@ def testing(args: Config):
     os.makedirs(args.out_dir, exist_ok=True)
 
     gaussians = load_model(args.model_dir)
-    gaussians.init_deferred(args)
+    gaussians.init_deferred(args, mode='test')
     if gaussians.use_deferred:
         gaussians.save_envmap_visualization(path.join(args.out_dir, 'envmap_preview.png'))
     gaussians.is_test = args.test.is_test
