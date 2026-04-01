@@ -103,6 +103,8 @@ def training(args: Config):
 
         loss_dict = dict(l1_loss=l1loss, lpips_loss=lpipsloss, dxyzsmooth_loss=dxyzsmoothloss, scaling_loss=scaling_loss)
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
+        if gaussians.use_deferred and iteration in args.test_iterations:
+            gaussians.save_envmap_visualization(path.join(args.out_dir, f'envmap_{iteration:08d}.png'))
 
         # optimizer step
         gaussians.optimizer_step()
@@ -172,6 +174,10 @@ def training_report(scene: Scene, gaussians: GaussianModel, iteration, test_iter
             if cam['idx'] in write_idxs:
                 frame_id, cam_id = cam['frame_id'], cam['cam_id']
                 tb_writer.add_images(f'train_view_{cam_id:02d}_{frame_id:06d}/render', image.permute(2,0,1)[None], global_step=iteration)
+                if gaussians.use_deferred:
+                    comps = gaussians.render_deferred_buffers(cam, background=background)
+                    for name, cimg in comps.items():
+                        tb_writer.add_images(f'train_view_{cam_id:02d}_{frame_id:06d}/{name}', torch.clamp(cimg, 0, 1).permute(2,0,1)[None], global_step=iteration)
                 if iteration == test_iterations[0]:
                     tb_writer.add_images(f'train_view_{cam_id:02d}_{frame_id:06d}/ground_truth', image_gt.permute(2,0,1)[None], global_step=iteration)
 

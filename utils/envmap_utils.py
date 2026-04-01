@@ -10,6 +10,11 @@ def _srgb_to_linear(image):
     return np.where(image <= threshold, image / 12.92, ((image + 0.055) / 1.055) ** 2.4)
 
 
+def linear_to_srgb(image):
+    threshold = 0.0031308
+    return np.where(image <= threshold, image * 12.92, 1.055 * np.power(np.clip(image, 0.0, None), 1.0 / 2.4) - 0.055)
+
+
 def load_envmap_tensor(envmap_path, device='cuda'):
     if envmap_path is None:
         return None
@@ -40,3 +45,12 @@ def sample_latlong(envmap, dirs):
     tex = envmap.permute(2, 0, 1).unsqueeze(0)
     sampled = F.grid_sample(tex, grid, mode='bilinear', padding_mode='border', align_corners=False)
     return sampled.view(3, -1).transpose(0, 1)
+
+
+def save_envmap_png(envmap, path):
+    if torch.is_tensor(envmap):
+        image = envmap.detach().float().cpu().numpy()
+    else:
+        image = envmap.astype(np.float32)
+    image = np.clip(linear_to_srgb(image), 0.0, 1.0)
+    iio.imwrite(path, (image * 255.0 + 0.5).astype(np.uint8))
