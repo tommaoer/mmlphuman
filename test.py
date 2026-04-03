@@ -125,7 +125,7 @@ def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_li
 
     os.makedirs(path.join(out_dir), exist_ok=True)
     if gaussians.use_deferred:
-        for k in ['albedo', 'diffuse', 'specular', 'normal']:
+        for k in ['albedo', 'diffuse', 'specular', 'roughness', 'normal']:
             os.makedirs(path.join(out_dir, k), exist_ok=True)
     for frame_id in tqdm(frame_ids):
         pose = pose_list[frame_id]
@@ -156,7 +156,7 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background):
     for k in ['gt', 'result', 'mask']:
         os.makedirs(path.join(out_dir, k), exist_ok=True)
     if gaussians.use_deferred:
-        for k in ['albedo', 'diffuse', 'specular', 'normal']:
+        for k in ['albedo', 'diffuse', 'specular', 'roughness', 'normal']:
             os.makedirs(path.join(out_dir, k), exist_ok=True)
 
     for cam in tqdm(test_dataloader):

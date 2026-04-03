@@ -547,6 +547,7 @@ class GaussianModel:
             albedo=torch.clamp(albedo, 0.0, 1.0),
             diffuse=torch.clamp(diffuse, 0.0, 10.0),
             specular=torch.clamp(specular, 0.0, 10.0),
+            roughness=torch.clamp(roughness.expand(-1, 3), 0.0, 1.0),
             normal=torch.clamp(normal, 0.0, 1.0),
         )
 
@@ -717,7 +718,7 @@ class GaussianModel:
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3,3]
         comp = self.get_deferred_components(cam_pos)
         renders = {}
-        for name in ['albedo', 'diffuse', 'specular', 'normal']:
+        for name in ['albedo', 'diffuse', 'specular', 'roughness', 'normal']:
             image, _, _ = self.render(cam, override_color=comp[name], scaling_modifier=scaling_modifier, background=background)
             renders[name] = image
         return renders
