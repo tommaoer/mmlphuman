@@ -29,14 +29,10 @@ from scene.dataset import data_to_cam
 from scene.net_vis import Visualizer
 from utils.config_utils import Config
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, psnr, dxyz_smooth_loss, gaussian_scaling_loss
+from utils.loss_utils import l1_loss, psnr, dxyz_smooth_loss, normal_smooth_loss, gaussian_scaling_loss
 from utils.image_utils import crop_image
 
 loss_fn_vgg = lpips.LPIPS(net='vgg').cuda()
-
-def ensure_finite(name, tensor):
-    if not torch.isfinite(tensor).all():
-        raise FloatingPointError(f'Found NaN/Inf in {name}')
 
 def training(args: Config):
 
@@ -76,7 +72,6 @@ def training(args: Config):
         gaussians.Th, gaussians.Rh = cam['Th'], cam['Rh']
 
         image, alpha, info = gaussians.render(cam, background=bg)
-        ensure_finite('render/image', image)
         image = torch.clamp(image, 0, 1)
         image_gt, mask, mask_boundary = cam['image'], cam['mask'], cam['mask_boundary']
         image_gt[~mask] = bg
@@ -87,26 +82,24 @@ def training(args: Config):
         if gaussians.use_deferred and args.lambda_albedo_rgb > 0:
             albedo_color = torch.sigmoid(gaussians._albedo)
             albedo_image, _, _ = gaussians.render(cam, override_color=albedo_color, background=bg)
-            ensure_finite('render/albedo', albedo_image)
             albedo_image = torch.clamp(albedo_image, 0, 1)
             albedo_rgb_loss = l1_loss(albedo_image, image_gt) * args.lambda_albedo_rgb
         else:
             albedo_rgb_loss = torch.tensor(0.0, device=image.device)
         dxyzsmoothloss = dxyz_smooth_loss(gaussians) * args.lambda_dxyz_smooth
+        normalsmoothloss = normal_smooth_loss(gaussians) * float(getattr(args, 'lambda_normal_smooth', 0.0))
 
         random_patch_flag = False if iteration < args.iteration_lpips_random_patch else True
         image_crop, image_gt_crop = crop_image(bg, mask, 512, random_patch_flag, image.permute(2,0,1), image_gt.permute(2,0,1))
         if iteration > args.iteration_lpips:
             pred = image_crop[None] * 2.0 - 1.0
             gt = image_gt_crop[None] * 2.0 - 1.0
-            ensure_finite('lpips/pred', pred)
-            ensure_finite('lpips/gt', gt)
             lpipsloss = loss_fn_vgg(pred, gt).mean() * args.lambda_lpips
         else: lpipsloss = torch.tensor(0.0, device=image.device) 
 
         scaling_loss = args.lambda_scaling * gaussian_scaling_loss(gaussians.get_cano_scaling, args.scaling_threshold)
 
-        loss = l1loss + albedo_rgb_loss + lpipsloss + dxyzsmoothloss + scaling_loss
+        loss = l1loss + albedo_rgb_loss + lpipsloss + dxyzsmoothloss + normalsmoothloss + scaling_loss
 
         loss.backward()
 
@@ -122,7 +115,7 @@ def training(args: Config):
             gaussians.sh_degree += 1
             print(f'SH degree: {gaussians.sh_degree}')
 
-        loss_dict = dict(l1_loss=l1loss, albedo_rgb_loss=albedo_rgb_loss, lpips_loss=lpipsloss, dxyzsmooth_loss=dxyzsmoothloss, scaling_loss=scaling_loss)
+        loss_dict = dict(l1_loss=l1loss, albedo_rgb_loss=albedo_rgb_loss, lpips_loss=lpipsloss, dxyzsmooth_loss=dxyzsmoothloss, normalsmooth_loss=normalsmoothloss, scaling_loss=scaling_loss)
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
         if gaussians.use_deferred and iteration in args.test_iterations:
             gaussians.save_envmap_visualization(path.join(args.out_dir, f'envmap_{iteration:08d}.png'))

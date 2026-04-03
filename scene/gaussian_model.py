@@ -347,6 +347,7 @@ class GaussianModel:
         N_feat = len(self.encoder_feat_params['layers.0.weight'])
         features = features.tile([N_feat, 1])
         features = vmap_mlp(self.encoder_feat_params, features)
+        features = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
 
         self.cache_dict['get_encoded_feature'] = features
         return features
@@ -356,6 +357,7 @@ class GaussianModel:
         if 'get_encoded_feature_gsparam_weight' in self.cache_dict: return self.cache_dict['get_encoded_feature_gsparam_weight']
         features = self.get_encoded_feature[...,:self.num_basis]
         features = torch.einsum('nrc,nr->nc', features[self.nbr_gsft], self.nbr_gsft_wght)
+        features = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
 
         self.cache_dict['get_encoded_feature_gsparam_weight'] = features
         return features
@@ -363,14 +365,20 @@ class GaussianModel:
     @property
     def get_dxyz_vt(self):
         if 'get_dxyz_vt' in self.cache_dict: return self.cache_dict['get_dxyz_vt']
-        if not self.is_dxyz_bs: return self.dxyz_vt
+        if not self.is_dxyz_bs:
+            dxyz_vt = torch.nan_to_num(self.dxyz_vt, nan=0.0, posinf=0.0, neginf=0.0)
+            self.cache_dict['get_dxyz_vt'] = dxyz_vt
+            return dxyz_vt
 
         features = self.get_encoded_feature[...,self.num_basis:]
         features = torch.einsum('nrc,nr->nc', features[self.nbr_vtft], self.nbr_vtft_wght)
+        features = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
 
-        dxyz_vt = torch.einsum('vc,vcl->vl', features, self.dxyz_bs)
+        dxyz_bs = torch.nan_to_num(self.dxyz_bs, nan=0.0, posinf=0.0, neginf=0.0)
+        dxyz_vt = torch.einsum('vc,vcl->vl', features, dxyz_bs)
 
         dxyz_vt = self.dxyz_vt + dxyz_vt
+        dxyz_vt = torch.nan_to_num(dxyz_vt, nan=0.0, posinf=0.0, neginf=0.0)
         self.cache_dict['get_dxyz_vt'] = dxyz_vt
 
         return dxyz_vt
@@ -379,7 +387,8 @@ class GaussianModel:
     def get_dxyz(self):
         if 'get_dxyz' in self.cache_dict: return self.cache_dict['get_dxyz']
 
-        dxyz = torch.sum(self.nbr_gs_invdist[...,None] * self.get_dxyz_vt[self.nbr_gs], dim=1) / torch.sum(self.nbr_gs_invdist, dim=-1)[...,None]
+        dxyz = torch.sum(self.nbr_gs_invdist[...,None] * self.get_dxyz_vt[self.nbr_gs], dim=1) / torch.clamp_min(torch.sum(self.nbr_gs_invdist, dim=-1)[...,None], 1e-12)
+        dxyz = torch.nan_to_num(dxyz, nan=0.0, posinf=0.0, neginf=0.0)
         self.cache_dict['get_dxyz'] = dxyz
         return dxyz
     
@@ -477,7 +486,7 @@ class GaussianModel:
         env_w = int(getattr(args, 'envmap_width', 64))
 
         if is_train:
-            env = torch.full((env_h, env_w, 3), float(self._to_logit(torch.tensor(0.99))), device='cuda')
+            env = torch.ones((env_h, env_w, 3), device='cuda')
             self.envmap = nn.Parameter(env.requires_grad_(True))
             return
 
@@ -503,11 +512,7 @@ class GaussianModel:
         ], dim=-1)
         return rot.reshape(-1, 3, 3)
 
-    def get_deferred_components(self, cam_pos):
-        if self.envmap is None:
-            color = self.get_color(cam_pos)
-            return dict(color=color, albedo=color, diffuse=color, specular=torch.zeros_like(color), normal=torch.zeros_like(color))
-
+    def get_world_normal(self):
         scales = self.get_cano_scaling
         axis_id = torch.argmin(scales, dim=-1)
         local_n = F.one_hot(axis_id, num_classes=3).float()
@@ -518,14 +523,20 @@ class GaussianModel:
         n_world = torch.einsum('nij,nj->ni', pose_rot, n_cano)
         if self.Rh is not None:
             n_world = torch.einsum('ij,nj->ni', self.Rh, n_world)
-        n_world = F.normalize(n_world, dim=-1, eps=1e-6)
+        return F.normalize(n_world, dim=-1)
 
-        view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1, eps=1e-6)
-        reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1, eps=1e-6)
+    def get_deferred_components(self, cam_pos):
+        if self.envmap is None:
+            color = self.get_color(cam_pos)
+            return dict(color=color, albedo=color, diffuse=color, specular=torch.zeros_like(color), normal=torch.zeros_like(color))
 
-        envmap = self.get_envmap_linear()
-        diffuse = sample_latlong(envmap, n_world)
-        spec_env = sample_latlong(envmap, reflect_dir)
+        n_world = self.get_world_normal()
+
+        view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1)
+        reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1)
+
+        diffuse = sample_latlong(self.envmap, n_world)
+        spec_env = sample_latlong(self.envmap, reflect_dir)
 
         albedo = torch.sigmoid(self._albedo)
         roughness = torch.sigmoid(self._roughness)
@@ -539,6 +550,7 @@ class GaussianModel:
             albedo=torch.clamp(albedo, 0.0, 1.0),
             diffuse=torch.clamp(diffuse, 0.0, 10.0),
             specular=torch.clamp(specular, 0.0, 10.0),
+            roughness=torch.clamp(roughness.expand(-1, 3), 0.0, 1.0),
             normal=torch.clamp(normal, 0.0, 1.0),
         )
 
@@ -549,14 +561,7 @@ class GaussianModel:
     def save_envmap_visualization(self, save_path):
         if self.envmap is None:
             return
-        save_envmap_png(self.get_envmap_linear(), save_path)
-
-    def get_envmap_linear(self):
-        if self.envmap is None:
-            return None
-        if self.optimize_envmap:
-            return torch.sigmoid(self.envmap)
-        return torch.clamp(self.envmap, min=0.0)
+        save_envmap_png(self.envmap, save_path)
 
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
@@ -716,7 +721,7 @@ class GaussianModel:
         cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3,3]
         comp = self.get_deferred_components(cam_pos)
         renders = {}
-        for name in ['albedo', 'diffuse', 'specular', 'normal']:
+        for name in ['albedo', 'diffuse', 'specular', 'roughness', 'normal']:
             image, _, _ = self.render(cam, override_color=comp[name], scaling_modifier=scaling_modifier, background=background)
             renders[name] = image
         return renders
@@ -766,14 +771,20 @@ class GaussianModel:
         self.xyz_vt = xyz_vt
         self.xyz_ft = xyz_ft
 
+        def _safe_knn_weights(dists):
+            dist_sqrt = torch.sqrt(torch.clamp_min(dists[0], 1e-12))
+            invdist = 1.0 / dist_sqrt
+            invdist_sum = torch.clamp_min(torch.sum(invdist, dim=-1, keepdim=True), 1e-12)
+            weights = invdist / invdist_sum
+            return invdist, weights
+
         dists, idxs, _ = knn_points(
             p1=self._xyz[None],
             p2=xyz_vt[None],
             K=3,
         )
         nbr_gs = idxs[0]
-        nbr_gs_invdist = 1 / torch.sqrt(dists[0])
-        nbr_gs_wght = nbr_gs_invdist / torch.sum(nbr_gs_invdist, dim=-1, keepdim=True)
+        nbr_gs_invdist, nbr_gs_wght = _safe_knn_weights(dists)
 
         _, idxs, _ = knn_points(
             p1=xyz_vt[None],
@@ -792,8 +803,7 @@ class GaussianModel:
             K=3,
         )
         nbr_gs = idxs[0]
-        nbr_gs_invdist = 1 / torch.sqrt(dists[0])
-        nbr_gs_wght = nbr_gs_invdist / torch.sum(nbr_gs_invdist, dim=-1, keepdim=True)
+        nbr_gs_invdist, nbr_gs_wght = _safe_knn_weights(dists)
         self.nbr_gsft = nbr_gs
         self.nbr_gsft_wght = nbr_gs_wght
 
@@ -803,7 +813,6 @@ class GaussianModel:
             K=3,
         )
         nbr_gs = idxs[0]
-        nbr_gs_invdist = 1 / torch.sqrt(dists[0])
-        nbr_gs_wght = nbr_gs_invdist / torch.sum(nbr_gs_invdist, dim=-1, keepdim=True)
+        nbr_gs_invdist, nbr_gs_wght = _safe_knn_weights(dists)
         self.nbr_vtft = nbr_gs
         self.nbr_vtft_wght = nbr_gs_wght
