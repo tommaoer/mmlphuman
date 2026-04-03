@@ -23,6 +23,39 @@ from utils.config_utils import Config
 from utils.image_utils import encode_bytes
 from utils.smpl_utils import init_smpl_pose
 
+def render_frame(gaussians: GaussianModel, cam, background):
+    if getattr(gaussians, 'use_deferredgs', False):
+        return gaussians.render_deferred(cam, background=background)
+    return gaussians.render(cam, background=background)
+
+def save_deferred_buffers(info, out_dir, frame_id):
+    os.makedirs(path.join(out_dir, 'albedo'), exist_ok=True)
+    os.makedirs(path.join(out_dir, 'normal'), exist_ok=True)
+    os.makedirs(path.join(out_dir, 'roughness'), exist_ok=True)
+    os.makedirs(path.join(out_dir, 'specular'), exist_ok=True)
+    os.makedirs(path.join(out_dir, 'alpha'), exist_ok=True)
+
+    alpha = torch.clamp(info['alpha'], 0, 1)
+    confident = alpha > 0.6
+
+    albedo = torch.clamp(info['albedo'], 0, 1)
+    normal_src = info['normal_geom']
+    normal = torch.clamp(normal_src * 0.5 + 0.5, 0, 1)
+    albedo[~confident.squeeze(-1)] = 0.0
+    normal[~confident.squeeze(-1)] = 0.5
+
+    albedo = (albedo * 255).byte().contiguous().cpu().numpy()
+    normal = (normal * 255).byte().contiguous().cpu().numpy()
+    roughness = (torch.clamp(info['roughness'], 0, 1).repeat(1, 1, 3) * 255).byte().contiguous().cpu().numpy()
+    specular = (torch.clamp(info['specular'], 0, 1).repeat(1, 1, 3) * 255).byte().contiguous().cpu().numpy()
+    alpha = (alpha.repeat(1, 1, 3) * 255).byte().contiguous().cpu().numpy()
+
+    iio.imwrite(path.join(out_dir, 'albedo', f'{frame_id:08d}.png'), albedo)
+    iio.imwrite(path.join(out_dir, 'normal', f'{frame_id:08d}.png'), normal)
+    iio.imwrite(path.join(out_dir, 'roughness', f'{frame_id:08d}.png'), roughness)
+    iio.imwrite(path.join(out_dir, 'specular', f'{frame_id:08d}.png'), specular)
+    iio.imwrite(path.join(out_dir, 'alpha', f'{frame_id:08d}.png'), alpha)
+
 def fovx_to_intrinsic(fovx, H, W):
     focal = W / 2 / np.tan(fovx/2)
     K = np.zeros((3, 3))
@@ -94,7 +127,7 @@ def testing_novel_cam_pose_speed(gaussians: GaussianModel, out_dir, frame_ids, p
     gaussians.smpl_poses = torch.as_tensor(pose['pose'])
     gaussians.Th = torch.as_tensor(pose['Th'])
     gaussians.Rh = torch.as_tensor(pose['Rh'])
-    image, alpha, info = gaussians.render(cam, background=background)
+    image, alpha, info = render_frame(gaussians, cam, background)
     torch.cuda.synchronize()
 
     iter_start = torch.cuda.Event(enable_timing = True)
@@ -108,7 +141,7 @@ def testing_novel_cam_pose_speed(gaussians: GaussianModel, out_dir, frame_ids, p
         gaussians.Th = torch.as_tensor(pose['Th'])
         gaussians.Rh = torch.as_tensor(pose['Rh'])
 
-        image, alpha, info = gaussians.render(cam, background=background)
+        image, alpha, info = render_frame(gaussians, cam, background)
 
         image = (torch.clamp(image, min=0, max=1.0) * 255).byte().contiguous()
         torch.cuda.synchronize()
@@ -121,7 +154,7 @@ def testing_novel_cam_pose_speed(gaussians: GaussianModel, out_dir, frame_ids, p
     print('Running time:', run_time)
     print('FPS:', fps)
 
-def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_list, cam, background):
+def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_list, cam, background, save_buffers=False):
 
     os.makedirs(path.join(out_dir), exist_ok=True)
     for frame_id in tqdm(frame_ids):
@@ -131,13 +164,15 @@ def testing_novel_cam_pose(gaussians: GaussianModel, out_dir, frame_ids, pose_li
         gaussians.smpl_poses = torch.as_tensor(pose['pose']).cpu()
         gaussians.Th = torch.clone(torch.as_tensor(pose['Th']).cpu())
         gaussians.Rh = torch.as_tensor(pose['Rh']).cpu()
-        image, alpha, info = gaussians.render(cam, background=background)
+        image, alpha, info = render_frame(gaussians, cam, background)
 
         image = (torch.clamp(image, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
         iio.imwrite(path.join(out_dir, f'{frame_id:08d}.png'), image)
+        if save_buffers and getattr(gaussians, 'use_deferredgs', False):
+            save_deferred_buffers(info, out_dir, frame_id)
 
 
-def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background):
+def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background, save_buffers=False):
     test_dataloader = DataLoader(
         dataset=dataset,
         batch_size=1,
@@ -155,7 +190,7 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background):
         gaussians.smpl_poses = cam['pose']
         gaussians.Th, gaussians.Rh = cam['Th'], cam['Rh']
 
-        image, alpha, info = gaussians.render(cam, background=background)
+        image, alpha, info = render_frame(gaussians, cam, background)
 
         image = (torch.clamp(image, min=0, max=1.0) * 255).byte().contiguous().cpu().numpy()
 
@@ -167,6 +202,8 @@ def testing_dataset(gaussians: GaussianModel, out_dir, dataset, background):
         iio.imwrite(path.join(out_dir, f'gt/{frame_id:08d}.png'), image_gt)
         iio.imwrite(path.join(out_dir, f'result/{frame_id:08d}.png'), image)
         iio.imwrite(path.join(out_dir, f'mask/{frame_id:08d}.png'), mask)
+        if save_buffers and getattr(gaussians, 'use_deferredgs', False):
+            save_deferred_buffers(info, out_dir, frame_id)
 
 
 @torch.no_grad()
@@ -177,6 +214,21 @@ def testing(args: Config):
     gaussians.is_test = args.test.is_test
     gaussians.prepare_test()
     background = torch.as_tensor(np.array(args.background)).float().cuda()
+    if args.test.envmap_path is not None:
+        relight_cfg = gaussians.load_envmap_lighting(args.test.envmap_path, args.test.envmap_intensity)
+        print(f'Loaded envmap relighting: {args.test.envmap_path}')
+        print(json.dumps(relight_cfg, indent=2)[:1000])
+
+    if args.test.relight_json is not None:
+        was_deferredgs = bool(getattr(gaussians, 'use_deferredgs', False))
+        relight_cfg = gaussians.load_deferred_lighting(args.test.relight_json)
+        print(f'Loaded relighting config: {args.test.relight_json}')
+        if not was_deferredgs:
+            print('Warning: checkpoint has no deferredGS flag; initialized deferred params from legacy checkpoint for relighting.')
+        print(json.dumps(relight_cfg, indent=2))
+    if args.test.save_light_envmap is not None:
+        gaussians.export_deferred_envmap(args.test.save_light_envmap)
+        print(f'Exported optimized light envmap to: {args.test.save_light_envmap}')
 
     # Dataset
     test_frame_ids = np.arange(args.test.begin_ith_frame, args.test.begin_ith_frame+args.test.frame_interval*args.test.num_frame, args.test.frame_interval).tolist()
@@ -197,7 +249,7 @@ def testing(args: Config):
         if args.test.test_speed:
             testing_novel_cam_pose_speed(gaussians, args.out_dir, test_frame_ids, pose_list, cam, background)
         else:
-            testing_novel_cam_pose(gaussians, args.out_dir, test_frame_ids, pose_list, cam, background)
+            testing_novel_cam_pose(gaussians, args.out_dir, test_frame_ids, pose_list, cam, background, save_buffers=args.test.save_deferred_buffers)
     else:
         DatasetType = get_dataset_type(args.data_dir)
         testset = DatasetType(
@@ -208,7 +260,7 @@ def testing(args: Config):
             image_scaling=args.image_scaling,
         )
 
-        testing_dataset(gaussians, args.out_dir, testset, background)
+        testing_dataset(gaussians, args.out_dir, testset, background, save_buffers=args.test.save_deferred_buffers)
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Testing")
@@ -220,12 +272,22 @@ if __name__ == "__main__":
 
     parser.add_argument('--cam_path', type=str, default=None)
     parser.add_argument('--pose_path', type=str, default=None)
+    parser.add_argument('--relight_json', type=str, default=None)
+    parser.add_argument('--envmap_path', type=str, default=None)
+    parser.add_argument('--envmap_intensity', type=float, default=1.0)
+    parser.add_argument('--save_light_envmap', type=str, default=None)
+    parser.add_argument('--save_deferred_buffers', action='store_true')
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--test_speed', action='store_true')
     pargs = parser.parse_args(sys.argv[1:])
 
     args = OmegaConf.load(pargs.config)
     args.data_dir, args.out_dir, args.model_dir, args.test.cam_path, args.test.pose_path = pargs.data_dir, pargs.out_dir, pargs.model_dir, pargs.cam_path, pargs.pose_path
+    args.test.relight_json = pargs.relight_json
+    args.test.envmap_path = pargs.envmap_path
+    args.test.envmap_intensity = pargs.envmap_intensity
+    args.test.save_light_envmap = pargs.save_light_envmap
+    args.test.save_deferred_buffers = pargs.save_deferred_buffers
     args.test.is_test, args.test.test_speed = pargs.test, pargs.test_speed
     torch.backends.cuda.matmul.allow_tf32 = True
 
