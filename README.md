@@ -131,10 +131,11 @@ envmap_path: /path/to/your/envmap.hdr   # optional
 envmap_height: 32
 envmap_width: 64
 envmap_lr: 0.001
+lambda_normal_smooth: 0.001   # optional, smooth deferred normals
 ```
 During training, the model optimizes per-Gaussian material factors (`albedo/roughness/specular`) together with an envmap initialized from white light (no input envmap required), while deformation and multi-view dynamic supervision remain unchanged. Material priors are initialized conservatively (`roughness≈1`, `specular≈0`). At test time, you can either load a custom envmap via `envmap_path` or use the optimized envmap from checkpoint.
 You can additionally use a weak albedo-to-RGB regularization (`lambda_albedo_rgb`, default `0.01`) to stabilize albedo decomposition when only RGB supervision is available.
-`test.py` will also export `envmap_preview.png` (linear->sRGB) and deferred component renders (`albedo/`, `diffuse/`, `specular/`, `normal/`) when deferred rendering is enabled.
+`test.py` will also export `envmap_preview.png` (linear->sRGB) and deferred component renders (`albedo/`, `diffuse/`, `specular/`, `roughness/`, `normal/`) when deferred rendering is enabled.
 
 Evaluation example codes are provided in `script/eval.ipynb`
 
