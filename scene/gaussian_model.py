@@ -567,6 +567,15 @@ class GaussianModel:
     def get_deferred_color(self, cam_pos):
         return self.get_deferred_components(cam_pos)['color']
 
+    def normal_smooth_loss(self):
+        if self.nbr_gs is None or self.nbr_gs.numel() == 0:
+            return torch.tensor(0.0, device=self.get_xyz.device)
+        n_cano = F.normalize(get_minimum_axis(self.get_cano_scaling, self.get_cano_rotation), dim=-1)
+        nbr_n = n_cano[self.nbr_gs]  # [N, K, 3]
+        weights = F.normalize(self.nbr_gs_invdist, p=1, dim=-1).unsqueeze(-1)  # [N, K, 1]
+        nbr_mean = torch.sum(nbr_n * weights, dim=1)
+        return ((n_cano - nbr_mean) ** 2).sum(dim=-1).mean()
+
     @torch.no_grad()
     def save_envmap_visualization(self, save_path):
         if self.envmap is None:

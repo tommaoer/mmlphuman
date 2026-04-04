@@ -97,8 +97,12 @@ def training(args: Config):
         else: lpipsloss = torch.tensor(0.0, device=image.device) 
 
         scaling_loss = args.lambda_scaling * gaussian_scaling_loss(gaussians.get_cano_scaling, args.scaling_threshold)
+        if gaussians.use_deferred and args.lambda_normal_smooth > 0:
+            normal_smooth_loss = gaussians.normal_smooth_loss() * args.lambda_normal_smooth
+        else:
+            normal_smooth_loss = torch.tensor(0.0, device=image.device)
 
-        loss = l1loss + albedo_rgb_loss + lpipsloss + dxyzsmoothloss + scaling_loss
+        loss = l1loss + albedo_rgb_loss + lpipsloss + dxyzsmoothloss + scaling_loss + normal_smooth_loss
 
         loss.backward()
 
@@ -114,7 +118,14 @@ def training(args: Config):
             gaussians.sh_degree += 1
             print(f'SH degree: {gaussians.sh_degree}')
 
-        loss_dict = dict(l1_loss=l1loss, albedo_rgb_loss=albedo_rgb_loss, lpips_loss=lpipsloss, dxyzsmooth_loss=dxyzsmoothloss, scaling_loss=scaling_loss)
+        loss_dict = dict(
+            l1_loss=l1loss,
+            albedo_rgb_loss=albedo_rgb_loss,
+            lpips_loss=lpipsloss,
+            dxyzsmooth_loss=dxyzsmoothloss,
+            scaling_loss=scaling_loss,
+            normal_smooth_loss=normal_smooth_loss,
+        )
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
         if gaussians.use_deferred and iteration in args.test_iterations:
             gaussians.save_envmap_visualization(path.join(args.out_dir, f'envmap_{iteration:08d}.png'))

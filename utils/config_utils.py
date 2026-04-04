@@ -62,6 +62,7 @@ class Config:
     scaling_threshold = 0.01
     lambda_dxyz_smooth = 0.1
     lambda_albedo_rgb = 0.01
+    lambda_normal_smooth = 0.0
     
     init_num_gs = 200_000
 
