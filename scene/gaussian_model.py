@@ -17,7 +17,7 @@ from utils.smpl_utils import smpl, interpolate_skinningfield, rigid_transform_te
 from utils.config_utils import Config
 from utils.sh_utils import RGB2SH
 from utils.envmap_utils import load_envmap_tensor, sample_latlong, save_envmap_png
-from utils.general_utils import get_minimum_axis, flip_align_view
+from utils.general_utils import get_minimum_axis
 
 class GaussianModel:
 
@@ -535,9 +535,14 @@ class GaussianModel:
             n_world = torch.einsum('ij,nj->ni', self.Rh, n_world)
         n_world = F.normalize(n_world, dim=-1)
 
-        view_to_point = F.normalize(self.get_xyz - cam_pos, dim=-1)
-        n_world, _ = flip_align_view(n_world, view_to_point)
-        view_dir = -view_to_point
+        # Keep deferred relighting view-independent: orient normals to point outward
+        # from the current Gaussian cloud center instead of camera-facing flipping.
+        center_dir = self.get_xyz - self.get_xyz.mean(dim=0, keepdim=True)
+        center_dir = F.normalize(center_dir, dim=-1)
+        outward_mask = (n_world * center_dir).sum(dim=-1, keepdim=True) >= 0
+        n_world = n_world * torch.where(outward_mask, 1, -1)
+
+        view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1)
         reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1)
 
         diffuse = sample_latlong(self.envmap, n_world)
