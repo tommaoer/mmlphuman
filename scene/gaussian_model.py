@@ -487,6 +487,15 @@ class GaussianModel:
         env_w = int(getattr(args, 'envmap_width', 64))
         envmap_exposure = float(getattr(args, 'envmap_exposure', 1.0))
         match_envmap_mean = bool(getattr(args, 'match_envmap_mean', True))
+        match_envmap_mode = str(getattr(args, 'match_envmap_mode', 'logmean')).lower()
+
+        def _env_luma_stat(env):
+            # Robust luminance statistic for cross-format exposure matching.
+            # log-mean is much less sensitive to HDR sun pixels than raw mean.
+            luma = 0.2126 * env[..., 0] + 0.7152 * env[..., 1] + 0.0722 * env[..., 2]
+            if match_envmap_mode == 'mean':
+                return torch.clamp(luma.mean(), min=1e-6)
+            return torch.exp(torch.mean(torch.log(torch.clamp(luma, min=1e-6))))
 
         if is_train:
             env = torch.ones((env_h, env_w, 3), device='cuda')
@@ -494,15 +503,15 @@ class GaussianModel:
             return
 
         if envmap_path is not None and len(envmap_path) > 0:
-            ref_env_mean = None
+            ref_env_stat = None
             if self.envmap is not None and self.envmap.numel() > 0:
-                ref_env_mean = self.envmap.detach().mean()
+                ref_env_stat = _env_luma_stat(self.envmap.detach())
             env = load_envmap_tensor(envmap_path, device='cuda')
             env = env * envmap_exposure
             if match_envmap_mean:
-                src_mean = torch.clamp(env.mean(), min=1e-6)
-                tgt_mean = ref_env_mean if ref_env_mean is not None else torch.tensor(1.0, device=env.device)
-                env = env * (tgt_mean / src_mean)
+                src_stat = _env_luma_stat(env)
+                tgt_stat = ref_env_stat if ref_env_stat is not None else torch.tensor(1.0, device=env.device)
+                env = env * (tgt_stat / torch.clamp(src_stat, min=1e-6))
             self.envmap = nn.Parameter(env.requires_grad_(False))
             return
 

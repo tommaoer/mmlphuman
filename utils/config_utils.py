@@ -55,6 +55,7 @@ class Config:
     envmap_lr = 0.001
     envmap_exposure = 1.0
     match_envmap_mean = True
+    match_envmap_mode = "logmean"
 
     # loss
     lambda_lpips = 0.1

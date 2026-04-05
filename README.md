@@ -133,9 +133,10 @@ envmap_width: 64
 envmap_lr: 0.001
 envmap_exposure: 1.0
 match_envmap_mean: true
+match_envmap_mode: logmean   # logmean (recommended for HDR) or mean
 ```
 During training, the model optimizes per-Gaussian material factors (`albedo/roughness/specular`) together with an envmap initialized from white light (no input envmap required), while deformation and multi-view dynamic supervision remain unchanged. Material priors are initialized conservatively (`roughness≈1`, `specular≈0`). At test time, you can either load a custom envmap via `envmap_path` or use the optimized envmap from checkpoint.
-When using a custom test-time envmap, brightness mismatch can make results overly dark or bright. `envmap_exposure` applies a manual global scale; `match_envmap_mean=true` automatically rescales the loaded envmap mean intensity to match the trained checkpoint envmap.
+When using a custom test-time envmap, brightness mismatch can make results overly dark or bright. `envmap_exposure` applies a manual global scale; `match_envmap_mean=true` automatically rescales the loaded envmap intensity to match the trained checkpoint envmap. `match_envmap_mode=logmean` is robust for HDR maps with very bright sun pixels.
 You can additionally use a weak albedo-to-RGB regularization (`lambda_albedo_rgb`, default `0.01`) to stabilize albedo decomposition when only RGB supervision is available.
 If deferred normals are noisy, you can enable normal smoothness regularization via `lambda_normal_smooth` (e.g. `0.01~0.1`) to enforce local consistency between neighboring Gaussians.
 `test.py` will also export `envmap_preview.png` (linear->sRGB) and deferred component renders (`albedo/`, `diffuse/`, `specular/`, `roughness/`, `normal/`) when deferred rendering is enabled.
