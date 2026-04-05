@@ -53,6 +53,8 @@ class Config:
     envmap_height = 32
     envmap_width = 64
     envmap_lr = 0.001
+    envmap_exposure = 1.0
+    match_envmap_mean = True
 
     # loss
     lambda_lpips = 0.1

@@ -485,6 +485,8 @@ class GaussianModel:
         envmap_path = getattr(args, 'envmap_path', None)
         env_h = int(getattr(args, 'envmap_height', 32))
         env_w = int(getattr(args, 'envmap_width', 64))
+        envmap_exposure = float(getattr(args, 'envmap_exposure', 1.0))
+        match_envmap_mean = bool(getattr(args, 'match_envmap_mean', True))
 
         if is_train:
             env = torch.ones((env_h, env_w, 3), device='cuda')
@@ -492,7 +494,15 @@ class GaussianModel:
             return
 
         if envmap_path is not None and len(envmap_path) > 0:
+            ref_env_mean = None
+            if self.envmap is not None and self.envmap.numel() > 0:
+                ref_env_mean = self.envmap.detach().mean()
             env = load_envmap_tensor(envmap_path, device='cuda')
+            env = env * envmap_exposure
+            if match_envmap_mean:
+                src_mean = torch.clamp(env.mean(), min=1e-6)
+                tgt_mean = ref_env_mean if ref_env_mean is not None else torch.tensor(1.0, device=env.device)
+                env = env * (tgt_mean / src_mean)
             self.envmap = nn.Parameter(env.requires_grad_(False))
             return
 
