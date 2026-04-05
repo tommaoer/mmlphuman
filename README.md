@@ -139,6 +139,7 @@ During training, the model optimizes per-Gaussian material factors (`albedo/roug
 When using a custom test-time envmap, brightness mismatch can make results overly dark or bright. `envmap_exposure` applies a manual global scale; `match_envmap_mean=true` automatically rescales the loaded envmap intensity to match the trained checkpoint envmap. `match_envmap_mode=logmean` is robust for HDR maps with very bright sun pixels.
 You can additionally use a weak albedo-to-RGB regularization (`lambda_albedo_rgb`, default `0.01`) to stabilize albedo decomposition when only RGB supervision is available.
 If deferred normals are noisy, you can enable normal smoothness regularization via `lambda_normal_smooth` (e.g. `0.01~0.1`) to enforce local consistency between neighboring Gaussians.
+You can further add image-space TV regularization during training: `lambda_tv_rgb` for rendered RGB and `lambda_tv_normal` for deferred normal render (typical start: `1e-4 ~ 1e-3`).
 `test.py` will also export `envmap_preview.png` (linear->sRGB) and deferred component renders (`albedo/`, `diffuse/`, `specular/`, `roughness/`, `normal/`) when deferred rendering is enabled.
 
 Evaluation example codes are provided in `script/eval.ipynb`

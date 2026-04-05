@@ -51,3 +51,21 @@ def gaussian_scaling_loss(scaling, threshold=0.01):
     scale_sub = scaling - threshold
     loss = torch.where(scale_sub > 0, scaling, torch.tensor(0, device=scaling.device)).mean()
     return loss
+
+
+def total_variation_loss(image, mask=None, eps=1e-6):
+    # image: [H, W, C], mask: [H, W] boolean/float (optional)
+    dh = torch.abs(image[1:, :, :] - image[:-1, :, :])
+    dw = torch.abs(image[:, 1:, :] - image[:, :-1, :])
+
+    if mask is not None:
+        mask = mask.float()
+        mh = (mask[1:, :] * mask[:-1, :]).unsqueeze(-1)
+        mw = (mask[:, 1:] * mask[:, :-1]).unsqueeze(-1)
+        dh = dh * mh
+        dw = dw * mw
+        denom = mh.sum() + mw.sum()
+        return (dh.sum() + dw.sum()) / torch.clamp(denom, min=eps)
+
+    denom = dh.numel() + dw.numel()
+    return (dh.sum() + dw.sum()) / max(denom, 1)

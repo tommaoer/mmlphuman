@@ -29,7 +29,7 @@ from scene.dataset import data_to_cam
 from scene.net_vis import Visualizer
 from utils.config_utils import Config
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, psnr, dxyz_smooth_loss, gaussian_scaling_loss
+from utils.loss_utils import l1_loss, psnr, dxyz_smooth_loss, gaussian_scaling_loss, total_variation_loss
 from utils.image_utils import crop_image
 
 loss_fn_vgg = lpips.LPIPS(net='vgg').cuda()
@@ -101,8 +101,19 @@ def training(args: Config):
             normal_smooth_loss = gaussians.normal_smooth_loss() * args.lambda_normal_smooth
         else:
             normal_smooth_loss = torch.tensor(0.0, device=image.device)
+        if args.lambda_tv_rgb > 0:
+            tv_rgb_loss = total_variation_loss(image, mask=mask) * args.lambda_tv_rgb
+        else:
+            tv_rgb_loss = torch.tensor(0.0, device=image.device)
+        if gaussians.use_deferred and args.lambda_tv_normal > 0:
+            cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3,3]
+            normal_color = gaussians.get_deferred_components(cam_pos)['normal']
+            normal_image, _, _ = gaussians.render(cam, override_color=normal_color, background=bg)
+            tv_normal_loss = total_variation_loss(torch.clamp(normal_image, 0, 1), mask=mask) * args.lambda_tv_normal
+        else:
+            tv_normal_loss = torch.tensor(0.0, device=image.device)
 
-        loss = l1loss + albedo_rgb_loss + lpipsloss + dxyzsmoothloss + scaling_loss + normal_smooth_loss
+        loss = l1loss + albedo_rgb_loss + lpipsloss + dxyzsmoothloss + scaling_loss + normal_smooth_loss + tv_rgb_loss + tv_normal_loss
 
         loss.backward()
 
@@ -125,6 +136,8 @@ def training(args: Config):
             dxyzsmooth_loss=dxyzsmoothloss,
             scaling_loss=scaling_loss,
             normal_smooth_loss=normal_smooth_loss,
+            tv_rgb_loss=tv_rgb_loss,
+            tv_normal_loss=tv_normal_loss,
         )
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
         if gaussians.use_deferred and iteration in args.test_iterations:
