@@ -29,7 +29,7 @@ class GaussianModel:
         self.opacity_activation = torch.sigmoid
         self.inverse_opacity_activation = torch.logit
 
-        self.rotation_activation = F.normalize
+        self.rotation_activation = lambda x: F.normalize(x, dim=-1, eps=1e-8)
 
         self.color_activation = torch.sigmoid
         self.inverse_color_activation = torch.logit
@@ -230,13 +230,17 @@ class GaussianModel:
     def get_cano_scaling(self):
         if 'get_cano_scaling' in self.cache_dict: return self.cache_dict['get_cano_scaling'] 
         if not self.is_gsparam_bs: 
-            scaling = self.scaling_activation(self._scaling)
+            raw_scaling = self._scaling
         else:
             features = self.get_encoded_feature_gsparam_weight
             dscaling = torch.einsum('nc,ncl->nl', features, self.scaling_bs)
-
-            scaling = self._scaling + dscaling
-            scaling = self.scaling_activation(scaling)
+            raw_scaling = self._scaling + dscaling
+        # numerical guard: avoid NaN/Inf and exp overflow
+        raw_scaling = torch.nan_to_num(raw_scaling, nan=0.0, posinf=5.0, neginf=-10.0)
+        raw_scaling = torch.clamp(raw_scaling, min=-10.0, max=5.0)
+        scaling = self.scaling_activation(raw_scaling)
+        scaling = torch.nan_to_num(scaling, nan=1e-3, posinf=1e2, neginf=1e-6)
+        scaling = torch.clamp(scaling, min=1e-6, max=1e2)
         
         self.cache_dict['get_cano_scaling'] = scaling
         return scaling
@@ -284,13 +288,14 @@ class GaussianModel:
     @property
     def get_cano_rotation(self):
         if not self.is_gsparam_bs: 
-            rotation = self.rotation_activation(self._rotation)
+            raw_rotation = self._rotation
         else:
             features = self.get_encoded_feature_gsparam_weight
             drotation = torch.einsum('nc,ncl->nl', features, self.rotation_bs)
-
-            rotation = self._rotation + drotation
-            rotation = self.rotation_activation(rotation)
+            raw_rotation = self._rotation + drotation
+        raw_rotation = torch.nan_to_num(raw_rotation, nan=0.0, posinf=1.0, neginf=-1.0)
+        rotation = self.rotation_activation(raw_rotation)
+        rotation = torch.nan_to_num(rotation, nan=0.0, posinf=1.0, neginf=-1.0)
 
         return rotation
 
@@ -727,10 +732,25 @@ class GaussianModel:
         for optimizer in self.optimizers.values():
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
+        self._sanitize_trainable_tensors()
         for scheduler in self.schedulers:
             scheduler.step()
         
         self.cache_dict = {}
+
+    @torch.no_grad()
+    def _sanitize_trainable_tensors(self):
+        self._scaling.data = torch.nan_to_num(self._scaling.data, nan=0.0, posinf=5.0, neginf=-10.0).clamp(-10.0, 5.0)
+        self._rotation.data = torch.nan_to_num(self._rotation.data, nan=0.0, posinf=1.0, neginf=-1.0)
+        self._opacity.data = torch.nan_to_num(self._opacity.data, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
+        self._sh0.data = torch.nan_to_num(self._sh0.data, nan=0.0, posinf=5.0, neginf=-5.0).clamp(-5.0, 5.0)
+        self._shN.data = torch.nan_to_num(self._shN.data, nan=0.0, posinf=5.0, neginf=-5.0).clamp(-5.0, 5.0)
+        if self.use_deferred:
+            self._albedo.data = torch.nan_to_num(self._albedo.data, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
+            self._roughness.data = torch.nan_to_num(self._roughness.data, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
+            self._specular.data = torch.nan_to_num(self._specular.data, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
+            if self.envmap is not None and self.envmap.numel() > 0:
+                self.envmap.data = torch.nan_to_num(self.envmap.data, nan=0.0, posinf=50.0, neginf=0.0).clamp(0.0, 50.0)
 
     def render(self, cam, override_color=None, scaling_modifier=1.0, background=None):
         covars = self.get_covariance(scaling_modifier)
