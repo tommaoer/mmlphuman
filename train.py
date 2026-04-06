@@ -29,7 +29,17 @@ from scene.dataset import data_to_cam
 from scene.net_vis import Visualizer
 from utils.config_utils import Config
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, psnr, dxyz_smooth_loss, gaussian_scaling_loss, total_variation_loss
+from utils.loss_utils import (
+    l1_loss,
+    psnr,
+    dxyz_smooth_loss,
+    gaussian_scaling_loss,
+    total_variation_loss,
+    bilateral_smooth_loss,
+    base_smooth_loss,
+    depth_to_world_normal,
+    cosine_normal_loss,
+)
 from utils.image_utils import crop_image
 
 loss_fn_vgg = lpips.LPIPS(net='vgg').cuda()
@@ -105,15 +115,66 @@ def training(args: Config):
             tv_rgb_loss = total_variation_loss(image, mask=mask) * args.lambda_tv_rgb
         else:
             tv_rgb_loss = torch.tensor(0.0, device=image.device)
-        if gaussians.use_deferred and args.lambda_tv_normal > 0:
-            cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3,3]
-            normal_color = gaussians.get_deferred_components(cam_pos)['normal']
-            normal_image, _, _ = gaussians.render(cam, override_color=normal_color, background=bg)
-            tv_normal_loss = total_variation_loss(torch.clamp(normal_image, 0, 1), mask=mask) * args.lambda_tv_normal
-        else:
-            tv_normal_loss = torch.tensor(0.0, device=image.device)
+        tv_normal_loss = torch.tensor(0.0, device=image.device)
+        brdf_smoothness_loss = torch.tensor(0.0, device=image.device)
+        base_smoothness_loss = torch.tensor(0.0, device=image.device)
+        depth_normal_consistency_loss = torch.tensor(0.0, device=image.device)
 
-        loss = l1loss + albedo_rgb_loss + lpipsloss + dxyzsmoothloss + scaling_loss + normal_smooth_loss + tv_rgb_loss + tv_normal_loss
+        need_deferred_losses = gaussians.use_deferred and (
+            args.lambda_tv_normal > 0
+            or args.lambda_brdf_smoothness > 0
+            or args.lambda_base_smoothness > 0
+            or args.lambda_depth_normal_consistency > 0
+        )
+        if need_deferred_losses:
+            cam_pos = torch.linalg.inv_ex(cam['w2c'])[0][:3, 3]
+            comp_images = gaussians.render_deferred_buffers(cam, background=bg)
+            normal_image = torch.clamp(comp_images['normal'], 0, 1)
+            alpha_mask = (alpha[..., 0] > 0.5) if alpha.dim() == 3 else (alpha > 0.5)
+            valid_mask = mask & alpha_mask
+
+            if args.lambda_tv_normal > 0:
+                tv_normal_loss = total_variation_loss(normal_image, mask=valid_mask) * args.lambda_tv_normal
+
+            if args.lambda_brdf_smoothness > 0:
+                l_diff = bilateral_smooth_loss(torch.clamp(comp_images['diffuse'], 0, 1), image_gt, mask=valid_mask)
+                l_spec = bilateral_smooth_loss(torch.clamp(comp_images['specular'], 0, 1), image_gt, mask=valid_mask)
+                l_rough = base_smooth_loss(torch.clamp(comp_images['roughness'], 0, 1), mask=valid_mask)
+                l_albedo = bilateral_smooth_loss(torch.clamp(comp_images['albedo'], 0, 1), image_gt, mask=valid_mask)
+                brdf_smoothness_loss = (l_diff + l_spec + l_rough + l_albedo) * args.lambda_brdf_smoothness
+
+            if args.lambda_base_smoothness > 0:
+                l_rough = base_smooth_loss(torch.clamp(comp_images['roughness'], 0, 1), mask=valid_mask)
+                l_albedo = base_smooth_loss(torch.clamp(comp_images['albedo'], 0, 1), mask=valid_mask)
+                base_smoothness_loss = (l_rough + l_albedo) * args.lambda_base_smoothness
+
+            if args.lambda_depth_normal_consistency > 0:
+                xyz = gaussians.get_xyz
+                xyz_cam = torch.einsum('ij,nj->ni', cam['w2c'][:3, :3], xyz) + cam['w2c'][:3, 3]
+                depth_color = xyz_cam[:, 2:3].expand(-1, 3)
+                depth_image, _, _ = gaussians.render(cam, override_color=depth_color, background=bg)
+                depth_map = torch.clamp(depth_image[..., 0], min=1e-6)
+                depth_normal_world, depth_valid = depth_to_world_normal(depth_map, cam['K'], cam['w2c'], mask=valid_mask)
+                pred_normal_world = normal_image * 2.0 - 1.0
+                depth_normal_consistency_loss = cosine_normal_loss(
+                    pred_normal_world,
+                    depth_normal_world,
+                    mask=depth_valid,
+                ) * args.lambda_depth_normal_consistency
+
+        loss = (
+            l1loss
+            + albedo_rgb_loss
+            + lpipsloss
+            + dxyzsmoothloss
+            + scaling_loss
+            + normal_smooth_loss
+            + tv_rgb_loss
+            + tv_normal_loss
+            + brdf_smoothness_loss
+            + base_smoothness_loss
+            + depth_normal_consistency_loss
+        )
 
         loss.backward()
 
@@ -138,6 +199,9 @@ def training(args: Config):
             normal_smooth_loss=normal_smooth_loss,
             tv_rgb_loss=tv_rgb_loss,
             tv_normal_loss=tv_normal_loss,
+            brdf_smoothness_loss=brdf_smoothness_loss,
+            base_smoothness_loss=base_smoothness_loss,
+            depth_normal_consistency_loss=depth_normal_consistency_loss,
         )
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
         if gaussians.use_deferred and iteration in args.test_iterations:

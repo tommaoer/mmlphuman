@@ -140,6 +140,10 @@ When using a custom test-time envmap, brightness mismatch can make results overl
 You can additionally use a weak albedo-to-RGB regularization (`lambda_albedo_rgb`, default `0.01`) to stabilize albedo decomposition when only RGB supervision is available.
 If deferred normals are noisy, you can enable normal smoothness regularization via `lambda_normal_smooth` (e.g. `0.01~0.1`) to enforce local consistency between neighboring Gaussians.
 You can further add image-space TV regularization during training: `lambda_tv_rgb` for rendered RGB and `lambda_tv_normal` for deferred normal render (typical start: `1e-4 ~ 1e-3`).
+More GS-ROR-style optional constraints are also supported:
+- `lambda_brdf_smoothness`: edge-aware smoothness on deferred `diffuse/specular/albedo` + base smoothness on `roughness`.
+- `lambda_base_smoothness`: base TV smoothness on deferred `albedo/roughness`.
+- `lambda_depth_normal_consistency`: self-supervised depth->normal consistency (render Gaussian depth, derive depth normals, align with deferred normals).
 `test.py` will also export `envmap_preview.png` (linear->sRGB) and deferred component renders (`albedo/`, `diffuse/`, `specular/`, `roughness/`, `normal/`) when deferred rendering is enabled.
 
 Evaluation example codes are provided in `script/eval.ipynb`

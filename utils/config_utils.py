@@ -68,6 +68,9 @@ class Config:
     lambda_normal_smooth = 0.0
     lambda_tv_rgb = 0.0
     lambda_tv_normal = 0.0
+    lambda_brdf_smoothness = 0.0
+    lambda_base_smoothness = 0.0
+    lambda_depth_normal_consistency = 0.0
     
     init_num_gs = 200_000
 
