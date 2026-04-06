@@ -113,10 +113,12 @@ def depth_to_world_normal(depth, K, w2c, mask=None):
     y = (ys - cy) * z / torch.clamp(fy, min=1e-8)
     pts = torch.stack([x, y, z], dim=-1)  # [H, W, 3] in camera space
 
-    dx = pts[:, 1:, :] - pts[:, :-1, :]
-    dy = pts[1:, :, :] - pts[:-1, :, :]
-    dx = F.pad(dx, (0, 0, 0, 1, 0, 0), mode='replicate')
-    dy = F.pad(dy, (0, 0, 0, 0, 0, 1), mode='replicate')
+    dx = pts[:, 1:, :] - pts[:, :-1, :]          # [H, W-1, 3]
+    dy = pts[1:, :, :] - pts[:-1, :, :]          # [H-1, W, 3]
+    # F.pad(..., mode='replicate') does not support this HWC 3D layout.
+    # Replicate-pad manually to recover [H, W, 3].
+    dx = torch.cat([dx, dx[:, -1:, :]], dim=1)
+    dy = torch.cat([dy, dy[-1:, :, :]], dim=0)
     n_cam = torch.cross(dx, dy, dim=-1)
     n_cam = F.normalize(n_cam, dim=-1, eps=1e-6)
 
