@@ -55,6 +55,8 @@ class GaussianModel:
         self.use_deferred = False
         self.optimize_envmap = False
         self.envmap = None
+        self.roughness_min = 0.1
+        self.specular_strength_max = 0.35
 
         self.xyz_vt = torch.empty(0)
         self.xyz_ft = torch.empty(0)
@@ -493,6 +495,8 @@ class GaussianModel:
         envmap_exposure = float(getattr(args, 'envmap_exposure', 1.0))
         match_envmap_mean = bool(getattr(args, 'match_envmap_mean', True))
         match_envmap_mode = str(getattr(args, 'match_envmap_mode', 'logmean')).lower()
+        self.roughness_min = float(getattr(args, 'roughness_min', 0.1))
+        self.specular_strength_max = float(getattr(args, 'specular_strength_max', 0.35))
 
         def _env_luma_stat(env):
             # Robust luminance statistic for cross-format exposure matching.
@@ -573,9 +577,9 @@ class GaussianModel:
         spec_env = sample_latlong(self.envmap, reflect_dir)
 
         albedo = torch.sigmoid(self._albedo)
-        roughness = torch.sigmoid(self._roughness)
+        roughness = torch.clamp(torch.sigmoid(self._roughness), min=self.roughness_min, max=1.0)
         spec_power = torch.clamp(1.0 - roughness, min=0.02, max=1.0)
-        specular_strength = torch.sigmoid(self._specular)
+        specular_strength = torch.clamp(torch.sigmoid(self._specular), max=self.specular_strength_max)
         specular = spec_env * spec_power * specular_strength
         color = albedo * diffuse + specular
         normal = (n_world + 1.0) * 0.5

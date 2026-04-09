@@ -56,6 +56,8 @@ class Config:
     envmap_exposure = 1.0
     match_envmap_mean = True
     match_envmap_mode = "logmean"
+    roughness_min = 0.1
+    specular_strength_max = 0.35
 
     # loss
     lambda_lpips = 0.1
