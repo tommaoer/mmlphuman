@@ -136,13 +136,14 @@ match_envmap_mean: true
 match_envmap_mode: logmean   # logmean (recommended for HDR) or mean
 roughness_min: 0.1           # increase to reduce sparkling/high-frequency specular artifacts
 specular_strength_max: 0.35  # cap specular intensity for stability
-diffuse_mode: point          # point | blurred_env
+diffuse_mode: point          # point | blurred_env | sh_irradiance
 diffuse_blur_kernel: 0       # set odd number like 9/15 when diffuse_mode=blurred_env
 ```
 During training, the model optimizes per-Gaussian material factors (`albedo/roughness/specular`) together with an envmap initialized from white light (no input envmap required), while deformation and multi-view dynamic supervision remain unchanged. Material priors are initialized conservatively (`roughness≈1`, `specular≈0`). At test time, you can either load a custom envmap via `envmap_path` or use the optimized envmap from checkpoint.
 When using a custom test-time envmap, brightness mismatch can make results overly dark or bright. `envmap_exposure` applies a manual global scale; `match_envmap_mean=true` automatically rescales the loaded envmap intensity to match the trained checkpoint envmap. `match_envmap_mode=logmean` is robust for HDR maps with very bright sun pixels.
 If relighting shows strong glossy artifacts or shimmering, increase `roughness_min` and/or decrease `specular_strength_max`.
 If diffuse under external HDR envmaps looks unstable/high-frequency, switch to `diffuse_mode: blurred_env` and set `diffuse_blur_kernel` (e.g. `9` or `15`) to approximate low-frequency irradiance.
+For a more physically stable Lambertian approximation, you can use `diffuse_mode: sh_irradiance` (SH9 diffuse irradiance; specular remains full envmap sampling).
 You can additionally use a weak albedo-to-RGB regularization (`lambda_albedo_rgb`, default `0.01`) to stabilize albedo decomposition when only RGB supervision is available.
 If deferred normals are noisy, you can enable normal smoothness regularization via `lambda_normal_smooth` (e.g. `0.01~0.1`) to enforce local consistency between neighboring Gaussians.
 You can further add image-space TV regularization during training: `lambda_tv_rgb` for rendered RGB and `lambda_tv_normal` for deferred normal render (typical start: `1e-4 ~ 1e-3`).

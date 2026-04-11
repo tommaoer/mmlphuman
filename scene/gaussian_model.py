@@ -16,7 +16,7 @@ from scene.mlp import MLP, vmap_mlp
 from utils.smpl_utils import smpl, interpolate_skinningfield, rigid_transform_tensor, rigid_transform_numba
 from utils.config_utils import Config
 from utils.sh_utils import RGB2SH
-from utils.envmap_utils import load_envmap_tensor, sample_latlong, save_envmap_png, blur_envmap_tensor
+from utils.envmap_utils import load_envmap_tensor, sample_latlong, save_envmap_png, blur_envmap_tensor, sample_irradiance_sh9
 from utils.general_utils import get_minimum_axis
 
 class GaussianModel:
@@ -577,11 +577,13 @@ class GaussianModel:
         view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1)
         reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1)
 
-        if self.diffuse_mode == 'blurred_env' and self.diffuse_blur_kernel > 1:
+        if self.diffuse_mode == 'sh_irradiance':
+            diffuse = sample_irradiance_sh9(self.envmap, n_world)
+        elif self.diffuse_mode == 'blurred_env' and self.diffuse_blur_kernel > 1:
             env_for_diffuse = blur_envmap_tensor(self.envmap, kernel_size=self.diffuse_blur_kernel)
+            diffuse = sample_latlong(env_for_diffuse, n_world)
         else:
-            env_for_diffuse = self.envmap
-        diffuse = sample_latlong(env_for_diffuse, n_world)
+            diffuse = sample_latlong(self.envmap, n_world)
         spec_env = sample_latlong(self.envmap, reflect_dir)
 
         albedo = torch.sigmoid(self._albedo)
