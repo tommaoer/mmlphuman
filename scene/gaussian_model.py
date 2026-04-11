@@ -16,7 +16,14 @@ from scene.mlp import MLP, vmap_mlp
 from utils.smpl_utils import smpl, interpolate_skinningfield, rigid_transform_tensor, rigid_transform_numba
 from utils.config_utils import Config
 from utils.sh_utils import RGB2SH
-from utils.envmap_utils import load_envmap_tensor, sample_latlong, save_envmap_png, blur_envmap_tensor, sample_irradiance_sh9
+from utils.envmap_utils import (
+    load_envmap_tensor,
+    sample_latlong,
+    save_envmap_png,
+    blur_envmap_tensor,
+    sample_irradiance_sh9,
+    render_irradiance_envmap_sh9,
+)
 from utils.general_utils import get_minimum_axis
 
 class GaussianModel:
@@ -619,6 +626,18 @@ class GaussianModel:
         if self.envmap is None:
             return
         save_envmap_png(self.envmap, save_path)
+
+    @torch.no_grad()
+    def save_diffuse_envmap_visualization(self, save_path):
+        if self.envmap is None:
+            return
+        if self.diffuse_mode == 'sh_irradiance':
+            env = render_irradiance_envmap_sh9(self.envmap)
+        elif self.diffuse_mode == 'blurred_env' and self.diffuse_blur_kernel > 1:
+            env = blur_envmap_tensor(self.envmap, kernel_size=self.diffuse_blur_kernel)
+        else:
+            env = self.envmap
+        save_envmap_png(env, save_path)
 
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]

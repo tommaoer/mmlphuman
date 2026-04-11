@@ -127,3 +127,22 @@ def sample_irradiance_sh9(envmap, dirs):
     )[:, None]  # [9,1]
     coeff_irr = coeff * scale
     return torch.einsum('nk,kc->nc', basis, coeff_irr)
+
+
+def render_irradiance_envmap_sh9(envmap):
+    h, w = envmap.shape[:2]
+    ys, xs = torch.meshgrid(
+        torch.arange(h, device=envmap.device, dtype=envmap.dtype),
+        torch.arange(w, device=envmap.device, dtype=envmap.dtype),
+        indexing='ij'
+    )
+    theta = (ys + 0.5) / h * np.pi
+    phi = (xs + 0.5) / w * (2.0 * np.pi) - np.pi
+    sin_t = torch.sin(theta)
+    dirs = torch.stack([
+        torch.sin(phi) * sin_t,   # x
+        torch.cos(theta),         # y
+        torch.cos(phi) * sin_t,   # z
+    ], dim=-1).reshape(-1, 3)
+    irr = sample_irradiance_sh9(envmap, dirs)
+    return irr.reshape(h, w, 3)

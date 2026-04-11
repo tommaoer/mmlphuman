@@ -152,6 +152,7 @@ More GS-ROR-style optional constraints are also supported:
 - `lambda_base_smoothness`: base TV smoothness on deferred `albedo/roughness`.
 - `lambda_depth_normal_consistency`: self-supervised depth->normal consistency (render Gaussian depth, derive depth normals, align with deferred normals).
 `test.py` will also export `envmap_preview.png` (linear->sRGB) and deferred component renders (`albedo/`, `diffuse/`, `specular/`, `roughness/`, `normal/`) when deferred rendering is enabled.
+It additionally exports `envmap_diffuse_used.png`, i.e. the effective envmap used by the diffuse branch after mode processing (`point` / `blurred_env` / `sh_irradiance`).
 
 Evaluation example codes are provided in `script/eval.ipynb`
 
