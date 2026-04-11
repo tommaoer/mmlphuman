@@ -58,6 +58,8 @@ class Config:
     match_envmap_mode = "logmean"
     roughness_min = 0.1
     specular_strength_max = 0.35
+    diffuse_mode = "point"          # point | blurred_env
+    diffuse_blur_kernel = 0         # 0 disables blur; odd number like 9/15 enables blur
 
     # loss
     lambda_lpips = 0.1

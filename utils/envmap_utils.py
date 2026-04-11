@@ -54,3 +54,18 @@ def save_envmap_png(envmap, path):
         image = envmap.astype(np.float32)
     image = np.clip(linear_to_srgb(image), 0.0, 1.0)
     iio.imwrite(path, (image * 255.0 + 0.5).astype(np.uint8))
+
+
+def blur_envmap_tensor(envmap, kernel_size=9):
+    if kernel_size <= 1:
+        return envmap
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    pad = kernel_size // 2
+
+    tex = envmap.permute(2, 0, 1).unsqueeze(0)  # [1,3,H,W]
+    # Lat-long wrap on width, clamp on height.
+    tex = torch.cat([tex[..., -pad:], tex, tex[..., :pad]], dim=-1)
+    tex = F.pad(tex, (0, 0, pad, pad), mode='replicate')
+    tex = F.avg_pool2d(tex, kernel_size=kernel_size, stride=1)
+    return tex[0].permute(1, 2, 0).contiguous()
