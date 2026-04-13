@@ -97,6 +97,22 @@ def base_smooth_loss(pred, mask=None, eps=1e-6):
     return total_variation_loss(pred, mask=mask, eps=eps)
 
 
+def envmap_l2_loss(envmap):
+    # envmap: [H, W, 3]
+    return torch.mean(envmap * envmap)
+
+
+def envmap_entropy_loss(envmap, eps=1e-8):
+    # Encourage non-degenerate luminance distribution to avoid extreme black blocks.
+    # Use normalized luminance as a probability mass over envmap pixels.
+    luma = 0.2126 * envmap[..., 0] + 0.7152 * envmap[..., 1] + 0.0722 * envmap[..., 2]
+    luma = torch.clamp(luma, min=eps)
+    prob = luma / torch.clamp(luma.sum(), min=eps)
+    entropy = -(prob * torch.log(prob + eps)).sum()
+    # Minimize negative entropy => maximize entropy.
+    return -entropy
+
+
 def depth_to_world_normal(depth, K, w2c, mask=None):
     # depth: [H, W], K: [3,3], w2c: [4,4]
     h, w = depth.shape

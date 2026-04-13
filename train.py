@@ -39,6 +39,8 @@ from utils.loss_utils import (
     base_smooth_loss,
     depth_to_world_normal,
     cosine_normal_loss,
+    envmap_l2_loss,
+    envmap_entropy_loss,
 )
 from utils.image_utils import crop_image
 
@@ -119,6 +121,9 @@ def training(args: Config):
         brdf_smoothness_loss = torch.tensor(0.0, device=image.device)
         base_smoothness_loss = torch.tensor(0.0, device=image.device)
         depth_normal_consistency_loss = torch.tensor(0.0, device=image.device)
+        envmap_tv_loss = torch.tensor(0.0, device=image.device)
+        envmap_l2_reg_loss = torch.tensor(0.0, device=image.device)
+        envmap_entropy_reg_loss = torch.tensor(0.0, device=image.device)
 
         need_deferred_losses = gaussians.use_deferred and (
             args.lambda_tv_normal > 0
@@ -162,6 +167,20 @@ def training(args: Config):
                     mask=depth_valid,
                 ) * args.lambda_depth_normal_consistency
 
+        has_trainable_envmap = (
+            gaussians.use_deferred
+            and gaussians.optimize_envmap
+            and gaussians.envmap is not None
+            and gaussians.envmap.numel() > 0
+        )
+        if has_trainable_envmap:
+            if args.lambda_envmap_tv > 0:
+                envmap_tv_loss = total_variation_loss(gaussians.envmap) * args.lambda_envmap_tv
+            if args.lambda_envmap_l2 > 0:
+                envmap_l2_reg_loss = envmap_l2_loss(gaussians.envmap) * args.lambda_envmap_l2
+            if args.lambda_envmap_entropy > 0:
+                envmap_entropy_reg_loss = envmap_entropy_loss(gaussians.envmap) * args.lambda_envmap_entropy
+
         loss = (
             l1loss
             + albedo_rgb_loss
@@ -174,6 +193,9 @@ def training(args: Config):
             + brdf_smoothness_loss
             + base_smoothness_loss
             + depth_normal_consistency_loss
+            + envmap_tv_loss
+            + envmap_l2_reg_loss
+            + envmap_entropy_reg_loss
         )
 
         loss.backward()
@@ -202,6 +224,9 @@ def training(args: Config):
             brdf_smoothness_loss=brdf_smoothness_loss,
             base_smoothness_loss=base_smoothness_loss,
             depth_normal_consistency_loss=depth_normal_consistency_loss,
+            envmap_tv_loss=envmap_tv_loss,
+            envmap_l2_reg_loss=envmap_l2_reg_loss,
+            envmap_entropy_reg_loss=envmap_entropy_reg_loss,
         )
         training_report(scene, gaussians, iteration, args.test_iterations, loss_dict, background)
         if gaussians.use_deferred and iteration in args.test_iterations:
