@@ -53,12 +53,12 @@ class Config:
     envmap_height = 32
     envmap_width = 64
     envmap_lr = 0.001
-    envmap_exposure = 1.0
+    envmap_exposure = 1.35
     match_envmap_mean = True
     match_envmap_mode = "logmean"
     roughness_min = 0.1
-    specular_strength_max = 0.35
-    diffuse_mode = "point"          # point | blurred_env | sh_irradiance
+    specular_strength_max = 0.30
+    diffuse_mode = "sh_irradiance"  # point | blurred_env | sh_irradiance
     diffuse_blur_kernel = 0         # 0 disables blur; odd number like 9/15 enables blur
 
     # loss

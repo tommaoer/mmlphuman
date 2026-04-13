@@ -131,12 +131,12 @@ envmap_path: /path/to/your/envmap.hdr   # optional
 envmap_height: 32
 envmap_width: 64
 envmap_lr: 0.001
-envmap_exposure: 1.0
+envmap_exposure: 1.35
 match_envmap_mean: true
 match_envmap_mode: logmean   # logmean (recommended for HDR) or mean
 roughness_min: 0.1           # increase to reduce sparkling/high-frequency specular artifacts
-specular_strength_max: 0.35  # cap specular intensity for stability
-diffuse_mode: point          # point | blurred_env | sh_irradiance
+specular_strength_max: 0.30  # cap specular intensity for stability
+diffuse_mode: sh_irradiance  # point | blurred_env | sh_irradiance
 diffuse_blur_kernel: 0       # set odd number like 9/15 when diffuse_mode=blurred_env
 ```
 During training, the model optimizes per-Gaussian material factors (`albedo/roughness/specular`) together with an envmap initialized from white light (no input envmap required), while deformation and multi-view dynamic supervision remain unchanged. Material priors are initialized conservatively (`roughness≈1`, `specular≈0`). At test time, you can either load a custom envmap via `envmap_path` or use the optimized envmap from checkpoint.
