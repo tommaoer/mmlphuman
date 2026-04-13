@@ -16,7 +16,15 @@ from scene.mlp import MLP, vmap_mlp
 from utils.smpl_utils import smpl, interpolate_skinningfield, rigid_transform_tensor, rigid_transform_numba
 from utils.config_utils import Config
 from utils.sh_utils import RGB2SH
-from utils.envmap_utils import load_envmap_tensor, sample_latlong, save_envmap_png
+from utils.envmap_utils import (
+    load_envmap_tensor,
+    sample_latlong,
+    save_envmap_png,
+    blur_envmap_tensor,
+    sample_irradiance_sh9,
+    render_irradiance_envmap_sh9,
+)
+from utils.general_utils import get_minimum_axis
 
 class GaussianModel:
 
@@ -28,7 +36,7 @@ class GaussianModel:
         self.opacity_activation = torch.sigmoid
         self.inverse_opacity_activation = torch.logit
 
-        self.rotation_activation = F.normalize
+        self.rotation_activation = lambda x: F.normalize(x, dim=-1, eps=1e-8)
 
         self.color_activation = torch.sigmoid
         self.inverse_color_activation = torch.logit
@@ -54,6 +62,10 @@ class GaussianModel:
         self.use_deferred = False
         self.optimize_envmap = False
         self.envmap = None
+        self.roughness_min = 0.1
+        self.specular_strength_max = 0.35
+        self.diffuse_mode = "point"
+        self.diffuse_blur_kernel = 0
 
         self.xyz_vt = torch.empty(0)
         self.xyz_ft = torch.empty(0)
@@ -229,13 +241,17 @@ class GaussianModel:
     def get_cano_scaling(self):
         if 'get_cano_scaling' in self.cache_dict: return self.cache_dict['get_cano_scaling'] 
         if not self.is_gsparam_bs: 
-            scaling = self.scaling_activation(self._scaling)
+            raw_scaling = self._scaling
         else:
             features = self.get_encoded_feature_gsparam_weight
             dscaling = torch.einsum('nc,ncl->nl', features, self.scaling_bs)
-
-            scaling = self._scaling + dscaling
-            scaling = self.scaling_activation(scaling)
+            raw_scaling = self._scaling + dscaling
+        # numerical guard: avoid NaN/Inf and exp overflow
+        raw_scaling = torch.nan_to_num(raw_scaling, nan=0.0, posinf=5.0, neginf=-10.0)
+        raw_scaling = torch.clamp(raw_scaling, min=-10.0, max=5.0)
+        scaling = self.scaling_activation(raw_scaling)
+        scaling = torch.nan_to_num(scaling, nan=1e-3, posinf=1e2, neginf=1e-6)
+        scaling = torch.clamp(scaling, min=1e-6, max=1e2)
         
         self.cache_dict['get_cano_scaling'] = scaling
         return scaling
@@ -283,13 +299,14 @@ class GaussianModel:
     @property
     def get_cano_rotation(self):
         if not self.is_gsparam_bs: 
-            rotation = self.rotation_activation(self._rotation)
+            raw_rotation = self._rotation
         else:
             features = self.get_encoded_feature_gsparam_weight
             drotation = torch.einsum('nc,ncl->nl', features, self.rotation_bs)
-
-            rotation = self._rotation + drotation
-            rotation = self.rotation_activation(rotation)
+            raw_rotation = self._rotation + drotation
+        raw_rotation = torch.nan_to_num(raw_rotation, nan=0.0, posinf=1.0, neginf=-1.0)
+        rotation = self.rotation_activation(raw_rotation)
+        rotation = torch.nan_to_num(rotation, nan=0.0, posinf=1.0, neginf=-1.0)
 
         return rotation
 
@@ -484,6 +501,21 @@ class GaussianModel:
         envmap_path = getattr(args, 'envmap_path', None)
         env_h = int(getattr(args, 'envmap_height', 32))
         env_w = int(getattr(args, 'envmap_width', 64))
+        envmap_exposure = float(getattr(args, 'envmap_exposure', 1.0))
+        match_envmap_mean = bool(getattr(args, 'match_envmap_mean', True))
+        match_envmap_mode = str(getattr(args, 'match_envmap_mode', 'logmean')).lower()
+        self.roughness_min = float(getattr(args, 'roughness_min', 0.1))
+        self.specular_strength_max = float(getattr(args, 'specular_strength_max', 0.35))
+        self.diffuse_mode = str(getattr(args, 'diffuse_mode', 'point')).lower()
+        self.diffuse_blur_kernel = int(getattr(args, 'diffuse_blur_kernel', 0))
+
+        def _env_luma_stat(env):
+            # Robust luminance statistic for cross-format exposure matching.
+            # log-mean is much less sensitive to HDR sun pixels than raw mean.
+            luma = 0.2126 * env[..., 0] + 0.7152 * env[..., 1] + 0.0722 * env[..., 2]
+            if match_envmap_mode == 'mean':
+                return torch.clamp(luma.mean(), min=1e-6)
+            return torch.exp(torch.mean(torch.log(torch.clamp(luma, min=1e-6))))
 
         if is_train:
             env = torch.ones((env_h, env_w, 3), device='cuda')
@@ -491,7 +523,15 @@ class GaussianModel:
             return
 
         if envmap_path is not None and len(envmap_path) > 0:
+            ref_env_stat = None
+            if self.envmap is not None and self.envmap.numel() > 0:
+                ref_env_stat = _env_luma_stat(self.envmap.detach())
             env = load_envmap_tensor(envmap_path, device='cuda')
+            env = env * envmap_exposure
+            if match_envmap_mean:
+                src_stat = _env_luma_stat(env)
+                tgt_stat = ref_env_stat if ref_env_stat is not None else torch.tensor(1.0, device=env.device)
+                env = env * (tgt_stat / torch.clamp(src_stat, min=1e-6))
             self.envmap = nn.Parameter(env.requires_grad_(False))
             return
 
@@ -515,13 +555,18 @@ class GaussianModel:
     def get_deferred_components(self, cam_pos):
         if self.envmap is None:
             color = self.get_color(cam_pos)
-            return dict(color=color, albedo=color, diffuse=color, specular=torch.zeros_like(color), normal=torch.zeros_like(color))
+            zeros = torch.zeros_like(color)
+            return dict(
+                color=color,
+                albedo=color,
+                diffuse=color,
+                specular=zeros,
+                roughness=zeros,
+                normal=zeros,
+            )
 
-        scales = self.get_cano_scaling
-        axis_id = torch.argmin(scales, dim=-1)
-        local_n = F.one_hot(axis_id, num_classes=3).float()
-        rot = self._quat_to_rot(self.get_cano_rotation)
-        n_cano = torch.einsum('nij,nj->ni', rot, local_n)
+        # GS-ROR style normal construction: minimum principal axis + view alignment.
+        n_cano = get_minimum_axis(self.get_cano_scaling, self.get_cano_rotation)
 
         pose_rot = self.get_Gweights[:, :3, :3]
         n_world = torch.einsum('nij,nj->ni', pose_rot, n_cano)
@@ -529,16 +574,29 @@ class GaussianModel:
             n_world = torch.einsum('ij,nj->ni', self.Rh, n_world)
         n_world = F.normalize(n_world, dim=-1)
 
+        # Keep deferred relighting view-independent: orient normals to point outward
+        # from the current Gaussian cloud center instead of camera-facing flipping.
+        center_dir = self.get_xyz - self.get_xyz.mean(dim=0, keepdim=True)
+        center_dir = F.normalize(center_dir, dim=-1)
+        outward_mask = (n_world * center_dir).sum(dim=-1, keepdim=True) >= 0
+        n_world = n_world * torch.where(outward_mask, 1, -1)
+
         view_dir = F.normalize(cam_pos - self.get_xyz, dim=-1)
         reflect_dir = F.normalize(2 * (n_world * view_dir).sum(-1, keepdim=True) * n_world - view_dir, dim=-1)
 
-        diffuse = sample_latlong(self.envmap, n_world)
+        if self.diffuse_mode == 'sh_irradiance':
+            diffuse = sample_irradiance_sh9(self.envmap, n_world)
+        elif self.diffuse_mode == 'blurred_env' and self.diffuse_blur_kernel > 1:
+            env_for_diffuse = blur_envmap_tensor(self.envmap, kernel_size=self.diffuse_blur_kernel)
+            diffuse = sample_latlong(env_for_diffuse, n_world)
+        else:
+            diffuse = sample_latlong(self.envmap, n_world)
         spec_env = sample_latlong(self.envmap, reflect_dir)
 
         albedo = torch.sigmoid(self._albedo)
-        roughness = torch.sigmoid(self._roughness)
+        roughness = torch.clamp(torch.sigmoid(self._roughness), min=self.roughness_min, max=1.0)
         spec_power = torch.clamp(1.0 - roughness, min=0.02, max=1.0)
-        specular_strength = torch.sigmoid(self._specular)
+        specular_strength = torch.clamp(torch.sigmoid(self._specular), max=self.specular_strength_max)
         specular = spec_env * spec_power * specular_strength
         color = albedo * diffuse + specular
         normal = (n_world + 1.0) * 0.5
@@ -554,11 +612,32 @@ class GaussianModel:
     def get_deferred_color(self, cam_pos):
         return self.get_deferred_components(cam_pos)['color']
 
+    def normal_smooth_loss(self):
+        if self.nbr_gs is None or self.nbr_gs.numel() == 0:
+            return torch.tensor(0.0, device=self.get_xyz.device)
+        n_cano = F.normalize(get_minimum_axis(self.get_cano_scaling, self.get_cano_rotation), dim=-1)
+        nbr_n = n_cano[self.nbr_gs]  # [N, K, 3]
+        weights = F.normalize(self.nbr_gs_invdist, p=1, dim=-1).unsqueeze(-1)  # [N, K, 1]
+        nbr_mean = torch.sum(nbr_n * weights, dim=1)
+        return ((n_cano - nbr_mean) ** 2).sum(dim=-1).mean()
+
     @torch.no_grad()
     def save_envmap_visualization(self, save_path):
         if self.envmap is None:
             return
         save_envmap_png(self.envmap, save_path)
+
+    @torch.no_grad()
+    def save_diffuse_envmap_visualization(self, save_path):
+        if self.envmap is None:
+            return
+        if self.diffuse_mode == 'sh_irradiance':
+            env = render_irradiance_envmap_sh9(self.envmap)
+        elif self.diffuse_mode == 'blurred_env' and self.diffuse_blur_kernel > 1:
+            env = blur_envmap_tensor(self.envmap, kernel_size=self.diffuse_blur_kernel)
+        else:
+            env = self.envmap
+        save_envmap_png(env, save_path)
 
     def create_from_pcd(self, xyz=None, t_joints=None, joint_parents=None, all_poses=None, lbs_weights_grid_info=None, xyz_vt=None, xyz_ft=None):
         xyz = torch.as_tensor(xyz).float().cuda() # [N,3]
@@ -686,10 +765,25 @@ class GaussianModel:
         for optimizer in self.optimizers.values():
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
+        self._sanitize_trainable_tensors()
         for scheduler in self.schedulers:
             scheduler.step()
         
         self.cache_dict = {}
+
+    @torch.no_grad()
+    def _sanitize_trainable_tensors(self):
+        self._scaling.data = torch.nan_to_num(self._scaling.data, nan=0.0, posinf=5.0, neginf=-10.0).clamp(-10.0, 5.0)
+        self._rotation.data = torch.nan_to_num(self._rotation.data, nan=0.0, posinf=1.0, neginf=-1.0)
+        self._opacity.data = torch.nan_to_num(self._opacity.data, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
+        self._sh0.data = torch.nan_to_num(self._sh0.data, nan=0.0, posinf=5.0, neginf=-5.0).clamp(-5.0, 5.0)
+        self._shN.data = torch.nan_to_num(self._shN.data, nan=0.0, posinf=5.0, neginf=-5.0).clamp(-5.0, 5.0)
+        if self.use_deferred:
+            self._albedo.data = torch.nan_to_num(self._albedo.data, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
+            self._roughness.data = torch.nan_to_num(self._roughness.data, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
+            self._specular.data = torch.nan_to_num(self._specular.data, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
+            if self.envmap is not None and self.envmap.numel() > 0:
+                self.envmap.data = torch.nan_to_num(self.envmap.data, nan=0.0, posinf=50.0, neginf=0.0).clamp(0.0, 50.0)
 
     def render(self, cam, override_color=None, scaling_modifier=1.0, background=None):
         covars = self.get_covariance(scaling_modifier)

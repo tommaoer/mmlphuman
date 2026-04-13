@@ -16,6 +16,35 @@ import numpy as np
 import random
 import json
 
+
+def build_rotation(quat):
+    quat = torch.nn.functional.normalize(quat, dim=-1)
+    w, x, y, z = quat.unbind(dim=-1)
+    rot = torch.empty((quat.shape[0], 3, 3), device=quat.device, dtype=quat.dtype)
+    rot[:, 0, 0] = 1 - 2 * (y * y + z * z)
+    rot[:, 0, 1] = 2 * (x * y - z * w)
+    rot[:, 0, 2] = 2 * (x * z + y * w)
+    rot[:, 1, 0] = 2 * (x * y + z * w)
+    rot[:, 1, 1] = 1 - 2 * (x * x + z * z)
+    rot[:, 1, 2] = 2 * (y * z - x * w)
+    rot[:, 2, 0] = 2 * (x * z - y * w)
+    rot[:, 2, 1] = 2 * (y * z + x * w)
+    rot[:, 2, 2] = 1 - 2 * (x * x + y * y)
+    return rot
+
+
+def get_minimum_axis(scales, rotations):
+    sorted_idx = torch.argsort(scales, descending=False, dim=-1)
+    rot = build_rotation(rotations)
+    rot_sorted = torch.gather(rot, dim=2, index=sorted_idx[:, None, :].repeat(1, 3, 1))
+    return rot_sorted[:, :, 0]
+
+
+def flip_align_view(normal, viewdir):
+    dotprod = torch.sum(normal * -viewdir, dim=-1, keepdims=True)
+    non_flip = dotprod >= 0
+    return normal * torch.where(non_flip, 1, -1), non_flip
+
 def safe_state(silent, seed=0):
     old_f = sys.stdout
     class F:
