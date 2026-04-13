@@ -75,6 +75,9 @@ class Config:
     lambda_brdf_smoothness = 0.0
     lambda_base_smoothness = 0.0
     lambda_depth_normal_consistency = 0.0
+    lambda_envmap_tv = 0.0
+    lambda_envmap_l2 = 0.0
+    lambda_envmap_entropy = 0.0
     
     init_num_gs = 200_000
 
