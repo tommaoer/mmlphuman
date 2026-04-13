@@ -51,3 +51,111 @@ def gaussian_scaling_loss(scaling, threshold=0.01):
     scale_sub = scaling - threshold
     loss = torch.where(scale_sub > 0, scaling, torch.tensor(0, device=scaling.device)).mean()
     return loss
+
+
+def total_variation_loss(image, mask=None, eps=1e-6):
+    # image: [H, W, C], mask: [H, W] boolean/float (optional)
+    dh = torch.abs(image[1:, :, :] - image[:-1, :, :])
+    dw = torch.abs(image[:, 1:, :] - image[:, :-1, :])
+
+    if mask is not None:
+        mask = mask.float()
+        mh = (mask[1:, :] * mask[:-1, :]).unsqueeze(-1)
+        mw = (mask[:, 1:] * mask[:, :-1]).unsqueeze(-1)
+        dh = dh * mh
+        dw = dw * mw
+        denom = mh.sum() + mw.sum()
+        return (dh.sum() + dw.sum()) / torch.clamp(denom, min=eps)
+
+    denom = dh.numel() + dw.numel()
+    return (dh.sum() + dw.sum()) / max(denom, 1)
+
+
+def _edge_weight(guide, mask=None, sigma=10.0):
+    dh = torch.mean(torch.abs(guide[1:, :, :] - guide[:-1, :, :]), dim=-1, keepdim=True)
+    dw = torch.mean(torch.abs(guide[:, 1:, :] - guide[:, :-1, :]), dim=-1, keepdim=True)
+    wh = torch.exp(-sigma * dh)
+    ww = torch.exp(-sigma * dw)
+    if mask is not None:
+        mask = mask.float()
+        wh = wh * (mask[1:, :] * mask[:-1, :]).unsqueeze(-1)
+        ww = ww * (mask[:, 1:] * mask[:, :-1]).unsqueeze(-1)
+    return wh, ww
+
+
+def bilateral_smooth_loss(pred, guide, mask=None, sigma=10.0, eps=1e-6):
+    pdh = torch.abs(pred[1:, :, :] - pred[:-1, :, :])
+    pdw = torch.abs(pred[:, 1:, :] - pred[:, :-1, :])
+    wh, ww = _edge_weight(guide, mask=mask, sigma=sigma)
+    loss_h = (pdh * wh).sum()
+    loss_w = (pdw * ww).sum()
+    denom = wh.sum() + ww.sum()
+    return (loss_h + loss_w) / torch.clamp(denom, min=eps)
+
+
+def base_smooth_loss(pred, mask=None, eps=1e-6):
+    return total_variation_loss(pred, mask=mask, eps=eps)
+
+
+def envmap_l2_loss(envmap):
+    # envmap: [H, W, 3]
+    return torch.mean(envmap * envmap)
+
+
+def envmap_entropy_loss(envmap, eps=1e-8):
+    # Encourage non-degenerate luminance distribution to avoid extreme black blocks.
+    # Use normalized luminance as a probability mass over envmap pixels.
+    luma = 0.2126 * envmap[..., 0] + 0.7152 * envmap[..., 1] + 0.0722 * envmap[..., 2]
+    luma = torch.clamp(luma, min=eps)
+    prob = luma / torch.clamp(luma.sum(), min=eps)
+    entropy = -(prob * torch.log(prob + eps)).sum()
+    # Minimize negative entropy => maximize entropy.
+    return -entropy
+
+
+def depth_to_world_normal(depth, K, w2c, mask=None):
+    # depth: [H, W], K: [3,3], w2c: [4,4]
+    h, w = depth.shape
+    device = depth.device
+    ys, xs = torch.meshgrid(
+        torch.arange(h, device=device, dtype=depth.dtype),
+        torch.arange(w, device=device, dtype=depth.dtype),
+        indexing='ij'
+    )
+    fx, fy = K[0, 0], K[1, 1]
+    cx, cy = K[0, 2], K[1, 2]
+    z = depth
+    x = (xs - cx) * z / torch.clamp(fx, min=1e-8)
+    y = (ys - cy) * z / torch.clamp(fy, min=1e-8)
+    pts = torch.stack([x, y, z], dim=-1)  # [H, W, 3] in camera space
+
+    dx = pts[:, 1:, :] - pts[:, :-1, :]          # [H, W-1, 3]
+    dy = pts[1:, :, :] - pts[:-1, :, :]          # [H-1, W, 3]
+    # F.pad(..., mode='replicate') does not support this HWC 3D layout.
+    # Replicate-pad manually to recover [H, W, 3].
+    dx = torch.cat([dx, dx[:, -1:, :]], dim=1)
+    dy = torch.cat([dy, dy[-1:, :, :]], dim=0)
+    n_cam = torch.cross(dx, dy, dim=-1)
+    n_cam = F.normalize(n_cam, dim=-1, eps=1e-6)
+
+    c2w = torch.linalg.inv(w2c)
+    R = c2w[:3, :3]
+    n_world = torch.einsum('ij,hwj->hwi', R, n_cam)
+    n_world = F.normalize(n_world, dim=-1, eps=1e-6)
+
+    valid = torch.isfinite(n_world).all(dim=-1) & (z > 1e-6)
+    if mask is not None:
+        valid = valid & mask.bool()
+    return n_world, valid
+
+
+def cosine_normal_loss(pred_normal, ref_normal, mask=None, eps=1e-6):
+    # both normals in [-1,1], [H,W,3]
+    pred = F.normalize(pred_normal, dim=-1, eps=eps)
+    ref = F.normalize(ref_normal, dim=-1, eps=eps)
+    cos = torch.sum(pred * ref, dim=-1)
+    loss = 1.0 - torch.clamp(cos, -1.0, 1.0)
+    if mask is not None:
+        m = mask.float()
+        return (loss * m).sum() / torch.clamp(m.sum(), min=eps)
+    return loss.mean()

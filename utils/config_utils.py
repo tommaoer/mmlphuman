@@ -53,6 +53,13 @@ class Config:
     envmap_height = 32
     envmap_width = 64
     envmap_lr = 0.001
+    envmap_exposure = 1.35
+    match_envmap_mean = True
+    match_envmap_mode = "logmean"
+    roughness_min = 0.1
+    specular_strength_max = 0.30
+    diffuse_mode = "sh_irradiance"  # point | blurred_env | sh_irradiance
+    diffuse_blur_kernel = 0         # 0 disables blur; odd number like 9/15 enables blur
 
     # loss
     lambda_lpips = 0.1
@@ -62,6 +69,15 @@ class Config:
     scaling_threshold = 0.01
     lambda_dxyz_smooth = 0.1
     lambda_albedo_rgb = 0.01
+    lambda_normal_smooth = 0.0
+    lambda_tv_rgb = 0.0
+    lambda_tv_normal = 0.0
+    lambda_brdf_smoothness = 0.0
+    lambda_base_smoothness = 0.0
+    lambda_depth_normal_consistency = 0.0
+    lambda_envmap_tv = 0.0
+    lambda_envmap_l2 = 0.0
+    lambda_envmap_entropy = 0.0
     
     init_num_gs = 200_000
 
