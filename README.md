@@ -144,6 +144,27 @@ When using a custom test-time envmap, brightness mismatch can make results overl
 If relighting shows strong glossy artifacts or shimmering, increase `roughness_min` and/or decrease `specular_strength_max`.
 If diffuse under external HDR envmaps looks unstable/high-frequency, switch to `diffuse_mode: blurred_env` and set `diffuse_blur_kernel` (e.g. `9` or `15`) to approximate low-frequency irradiance.
 For a more physically stable Lambertian approximation, you can use `diffuse_mode: sh_irradiance` (SH9 diffuse irradiance; specular remains full envmap sampling).
+In practice, envmap file format has a large impact on relighting brightness:
+- Prefer `.hdr/.exr` for relighting input. These preserve high dynamic range radiance and usually give more physically plausible intensity.
+- Do not reuse `envmap_preview.png` as a true relighting light source. It is an sRGB visualization (tone/compression to 8-bit), not a faithful HDR lighting map.
+- If you must use `.png` as envmap input, treat it as LDR and tune `envmap_exposure` separately (typically larger than HDR settings).
+
+Recommended calibration workflow for external relighting envmaps:
+1. Start with HDR input when available.
+2. If results are over-bright, set:
+   - `match_envmap_mean: true`
+   - `match_envmap_mode: mean` (compare with `logmean` for HDR scenes with strong sun peaks)
+3. Then adjust `envmap_exposure` in small steps.
+4. As a rough starting range:
+   - HDR: `envmap_exposure = 0.6 ~ 1.2`
+   - PNG: `envmap_exposure = 1.2 ~ 2.5`
+
+If deferred normals look over-smoothed and relighting appears "flat":
+- Reduce normal smooth regularization first: decrease `lambda_normal_smooth` (or set to `0` for diagnosis).
+- Avoid overly strong image-space normal smoothing: keep `lambda_tv_normal` small.
+- Rebalance BRDF smoothness priors: lower `lambda_brdf_smoothness` / `lambda_base_smoothness` if details are being washed out.
+- Increase normal-shape contrast through material controls if needed: slightly lower `roughness_min` and/or increase `specular_strength_max` (carefully, to avoid sparkle artifacts).
+
 You can additionally use a weak albedo-to-RGB regularization (`lambda_albedo_rgb`, default `0.01`) to stabilize albedo decomposition when only RGB supervision is available.
 If deferred normals are noisy, you can enable normal smoothness regularization via `lambda_normal_smooth` (e.g. `0.01~0.1`) to enforce local consistency between neighboring Gaussians.
 You can further add image-space TV regularization during training: `lambda_tv_rgb` for rendered RGB and `lambda_tv_normal` for deferred normal render (typical start: `1e-4 ~ 1e-3`).
