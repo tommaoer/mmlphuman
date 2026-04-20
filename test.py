@@ -192,6 +192,7 @@ def testing(args: Config):
     gaussians.init_deferred(args, mode='test')
     if gaussians.use_deferred:
         gaussians.save_envmap_visualization(path.join(args.out_dir, 'envmap_preview.png'))
+        gaussians.save_diffuse_envmap_visualization(path.join(args.out_dir, 'envmap_diffuse_used.png'))
     gaussians.is_test = args.test.is_test
     gaussians.prepare_test()
     background = torch.as_tensor(np.array(args.background)).float().cuda()

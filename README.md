@@ -131,10 +131,49 @@ envmap_path: /path/to/your/envmap.hdr   # optional
 envmap_height: 32
 envmap_width: 64
 envmap_lr: 0.001
+envmap_exposure: 1.35
+match_envmap_mean: true
+match_envmap_mode: logmean   # logmean (recommended for HDR) or mean
+roughness_min: 0.1           # increase to reduce sparkling/high-frequency specular artifacts
+specular_strength_max: 0.30  # cap specular intensity for stability
+diffuse_mode: sh_irradiance  # point | blurred_env | sh_irradiance
+diffuse_blur_kernel: 0       # set odd number like 9/15 when diffuse_mode=blurred_env
 ```
 During training, the model optimizes per-Gaussian material factors (`albedo/roughness/specular`) together with an envmap initialized from white light (no input envmap required), while deformation and multi-view dynamic supervision remain unchanged. Material priors are initialized conservatively (`roughness≈1`, `specular≈0`). At test time, you can either load a custom envmap via `envmap_path` or use the optimized envmap from checkpoint.
+When using a custom test-time envmap, brightness mismatch can make results overly dark or bright. `envmap_exposure` applies a manual global scale; `match_envmap_mean=true` automatically rescales the loaded envmap intensity to match the trained checkpoint envmap. `match_envmap_mode=logmean` is robust for HDR maps with very bright sun pixels.
+If relighting shows strong glossy artifacts or shimmering, increase `roughness_min` and/or decrease `specular_strength_max`.
+If diffuse under external HDR envmaps looks unstable/high-frequency, switch to `diffuse_mode: blurred_env` and set `diffuse_blur_kernel` (e.g. `9` or `15`) to approximate low-frequency irradiance.
+For a more physically stable Lambertian approximation, you can use `diffuse_mode: sh_irradiance` (SH9 diffuse irradiance; specular remains full envmap sampling).
+In practice, envmap file format has a large impact on relighting brightness:
+- Prefer `.hdr/.exr` for relighting input. These preserve high dynamic range radiance and usually give more physically plausible intensity.
+- Do not reuse `envmap_preview.png` as a true relighting light source. It is an sRGB visualization (tone/compression to 8-bit), not a faithful HDR lighting map.
+- If you must use `.png` as envmap input, treat it as LDR and tune `envmap_exposure` separately (typically larger than HDR settings).
+
+Recommended calibration workflow for external relighting envmaps:
+1. Start with HDR input when available.
+2. If results are over-bright, set:
+   - `match_envmap_mean: true`
+   - `match_envmap_mode: mean` (compare with `logmean` for HDR scenes with strong sun peaks)
+3. Then adjust `envmap_exposure` in small steps.
+4. As a rough starting range:
+   - HDR: `envmap_exposure = 0.6 ~ 1.2`
+   - PNG: `envmap_exposure = 1.2 ~ 2.5`
+
+If deferred normals look over-smoothed and relighting appears "flat":
+- Reduce normal smooth regularization first: decrease `lambda_normal_smooth` (or set to `0` for diagnosis).
+- Avoid overly strong image-space normal smoothing: keep `lambda_tv_normal` small.
+- Rebalance BRDF smoothness priors: lower `lambda_brdf_smoothness` / `lambda_base_smoothness` if details are being washed out.
+- Increase normal-shape contrast through material controls if needed: slightly lower `roughness_min` and/or increase `specular_strength_max` (carefully, to avoid sparkle artifacts).
+
 You can additionally use a weak albedo-to-RGB regularization (`lambda_albedo_rgb`, default `0.01`) to stabilize albedo decomposition when only RGB supervision is available.
+If deferred normals are noisy, you can enable normal smoothness regularization via `lambda_normal_smooth` (e.g. `0.01~0.1`) to enforce local consistency between neighboring Gaussians.
+You can further add image-space TV regularization during training: `lambda_tv_rgb` for rendered RGB and `lambda_tv_normal` for deferred normal render (typical start: `1e-4 ~ 1e-3`).
+More GS-ROR-style optional constraints are also supported:
+- `lambda_brdf_smoothness`: edge-aware smoothness on deferred `diffuse/specular/albedo` + base smoothness on `roughness`.
+- `lambda_base_smoothness`: base TV smoothness on deferred `albedo/roughness`.
+- `lambda_depth_normal_consistency`: self-supervised depth->normal consistency (render Gaussian depth, derive depth normals, align with deferred normals).
 `test.py` will also export `envmap_preview.png` (linear->sRGB) and deferred component renders (`albedo/`, `diffuse/`, `specular/`, `roughness/`, `normal/`) when deferred rendering is enabled.
+It additionally exports `envmap_diffuse_used.png`, i.e. the effective envmap used by the diffuse branch after mode processing (`point` / `blurred_env` / `sh_irradiance`).
 
 Evaluation example codes are provided in `script/eval.ipynb`
 
